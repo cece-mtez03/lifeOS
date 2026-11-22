@@ -46,3 +46,18 @@
 .form-row.mini{margin:8px 0 0;flex-wrap:nowrap}.form-row.mini .field{padding:9px 10px;font-size:12px}.form-row.mini .field.date{flex:none;width:118px}.form-row.mini .primary{padding:9px 14px;font-size:14px}
 .space-card .card-actions{margin-top:12px}
 @media(max-width:760px){.form-row.mini .field.date{width:104px}}
+/* v4: duración y prioridad */
+.task-item{align-items:flex-start}.task-item input[type=checkbox]{margin-top:3px}
+.task-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}.task-main>span{overflow-wrap:anywhere}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.meta-t{font-size:10px;color:#8d998f}.meta .pill{margin:0}
+.chip-p{font-size:10px;font-weight:600;padding:3px 8px;border-radius:20px}
+.p-alta{background:#f2d9d6;color:#7a3a30}.p-media{background:#f3e2c7;color:#5b4320}.p-baja{background:#e6eee6;color:#3d6149}
+.task-item .icon-btn{margin-left:0;flex:none}.task-item .icon-btn:first-of-type{margin-left:auto}
+.form-row.mini{flex-direction:column;align-items:stretch;gap:6px}
+.mini-row,.edit-row{display:flex;flex-wrap:wrap;gap:6px}.mini-row select,.edit-row select{flex:1 1 110px;font-size:12px;padding:9px 8px}.mini-row .field.date,.edit-row .field.date{flex:1 1 118px;width:auto}.mini-row .primary{flex:none}
+.item.editing{display:block;background:#f3f7ef;border-radius:10px;padding:10px;margin:6px 0}.task-edit{display:grid;gap:8px}.task-edit .card-actions{margin-top:2px;align-items:center}
+/* v5: brain dump */
+.dump-form{display:grid;gap:10px;margin:12px 0}.dump-form textarea.field{width:100%;min-height:120px;resize:vertical;line-height:1.5;font-family:'DM Sans',sans-serif}.dump-form .primary{justify-self:start}
+.note{background:#edf2e9;color:var(--forest);border-radius:10px;padding:10px 12px;font-size:12px;margin:8px 0}
+.dump-list{margin-top:6px}.dump-item{flex-wrap:wrap;align-items:flex-start}
+.dump-actions{display:flex;align-items:center;gap:6px;flex:none;margin-left:auto}.dump-actions select{font-size:11px;padding:6px;max-width:112px}.dump-actions .text-button{font-size:12px;white-space:nowrap}.dump-actions .icon-btn{margin:0}

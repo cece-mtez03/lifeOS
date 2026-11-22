@@ -11,6 +11,7 @@ const MIN_GAP = 30; // minutos mínimos para contar como hueco libre
 
 const initial = {
   tasks: [],
+  dump: [],
   spaces: [],
   routines: [],
   events: [],
@@ -26,7 +27,7 @@ const initial = {
 /* ---------- Datos ---------- */
 function normalize(raw) {
   const d = Object.assign(structuredClone(initial), raw && typeof raw === 'object' ? raw : {});
-  ['tasks', 'activities', 'events', 'spaces', 'routines'].forEach(k => { if (!Array.isArray(d[k])) d[k] = []; });
+  ['tasks', 'activities', 'events', 'spaces', 'routines', 'dump'].forEach(k => { if (!Array.isArray(d[k])) d[k] = []; });
   d.settings = Object.assign({ dayStart: '08:00', dayEnd: '22:00' }, d.settings);
   return d;
 }
@@ -52,7 +53,7 @@ function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;
 const opts = (list, sel) => list.map(o => `<option${o === sel ? ' selected' : ''}>${esc(o)}</option>`).join('');
 
 /* ---------- Estado de interfaz ---------- */
-const ui = { view: 'today', calSettings: false, editActivity: null, weekOffset: 0 };
+const ui = { view: 'today', dumpNote: '', editTask: null, calSettings: false, editActivity: null, weekOffset: 0 };
 
 function page(view) {
   ui.view = view;
@@ -100,32 +101,59 @@ function slotHtml(x) {
 }
 
 /* ---------- Mi día ---------- */
+const PRIOS = ['Alta', 'Media', 'Baja'];
+const PRIO_RANK = { Alta: 0, Media: 1, Baja: 2 };
+const TASK_MINUTES = [0, 15, 30, 45, 60, 90, 120, 180, 240];
+const prioOf = t => PRIOS.includes(t.priority) ? t.priority : 'Media';
+const minOf = t => +t.minutes > 0 ? +t.minutes : 0;
+const minutesSelect = (sel, name = 'minutes') => `<select name="${name}" aria-label="Duración estimada">${TASK_MINUTES.map(m => `<option value="${m}"${m === sel ? ' selected' : ''}>${m ? '⏱ ' + dur(m) : '⏱ Sin estimar'}</option>`).join('')}</select>`;
+const prioritySelect = (sel, name = 'priority') => `<select name="${name}" aria-label="Prioridad">${PRIOS.map(p => `<option value="${p}"${p === sel ? ' selected' : ''}>Prioridad ${p.toLowerCase()}</option>`).join('')}</select>`;
+
+function taskEditForm(t) {
+  return `<div class="item editing"><form class="task-edit" data-form="task-edit-form" data-id="${esc(t.id)}">
+    <input class="field" name="name" value="${esc(t.name)}" required aria-label="Nombre de la tarea">
+    <div class="edit-row">
+      <select name="space" aria-label="Espacio"><option value="">General</option>${data.spaces.map(s => `<option value="${esc(s.id)}"${same(s.id, t.spaceId) ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+      <input class="field date" name="date" type="date" value="${esc(t.date || '')}" aria-label="Fecha">
+      ${minutesSelect(minOf(t))}${prioritySelect(prioOf(t))}
+    </div>
+    <div class="card-actions"><button class="primary">Guardar</button><button type="button" class="text-button" data-act="cancel-task-edit">Cancelar</button></div>
+  </form></div>`;
+}
 function taskRow(t, showSpace = true) {
+  if (ui.view === 'tasks' && same(ui.editTask, t.id)) return taskEditForm(t);
   const sp = byId(data.spaces, t.spaceId);
-  return `<div class="item"><input type="checkbox" data-task="${esc(t.id)}" ${t.done ? 'checked' : ''} aria-label="Hecha">
-    <span class="${t.done ? 'done' : ''}">${esc(t.name)}</span>
-    ${sp && showSpace ? `<span class="pill" style="background:${sp.color}">${esc(sp.name)}</span>` : ''}
-    <small>${fmtDate(t.date)}</small>
+  const meta = `<span class="chip-p p-${prioOf(t).toLowerCase()}">${prioOf(t)}</span>`
+    + (minOf(t) ? `<span class="meta-t">⏱ ${dur(minOf(t))}</span>` : '')
+    + (sp && showSpace ? `<span class="pill" style="background:${sp.color}">${esc(sp.name)}</span>` : '')
+    + (t.date ? `<span class="meta-t">${fmtDate(t.date)}</span>` : '');
+  return `<div class="item task-item"><input type="checkbox" data-task="${esc(t.id)}" ${t.done ? 'checked' : ''} aria-label="Hecha">
+    <div class="task-main"><span class="${t.done ? 'done' : ''}">${esc(t.name)}</span><div class="meta">${meta}</div></div>
+    ${ui.view === 'tasks' ? `<button class="icon-btn" data-act="edit-task" data-id="${esc(t.id)}" aria-label="Editar tarea">✎</button>` : ''}
     <button class="icon-btn" data-act="del-task" data-id="${esc(t.id)}" aria-label="Eliminar tarea">×</button></div>`;
 }
 /* Sugerencias para los huecos libres de hoy */
 function suggestionsForToday(info, nowMin) {
   const usedTasks = new Set(), usedActs = new Set();
   const ts = today();
+  const d3 = new Date(); d3.setDate(d3.getDate() + 3);
+  const soon = ymd(d3);
+  const urgency = t => !t.date ? 2 : t.date <= ts ? 0 : t.date <= soon ? 1 : 2;
+  const score = t => PRIO_RANK[prioOf(t)] + urgency(t);
   const pending = data.tasks.filter(t => !t.done)
-    .sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
+    .sort((a, b) => score(a) - score(b) || (a.date || '9999').localeCompare(b.date || '9999') || minOf(b) - minOf(a));
   const out = [];
   for (const f of info.slots.filter(x => x.kind === 'free')) {
     const start = Math.max(f.s, nowMin);
     const len = f.e - start;
     if (len < MIN_GAP) continue;
     const options = [];
-    const task = pending.find(t => !usedTasks.has(t.id));
+    const task = pending.find(t => !usedTasks.has(t.id) && (!minOf(t) || minOf(t) <= len));
     if (task) {
       usedTasks.add(task.id);
       const sp = byId(data.spaces, task.spaceId);
       const late = task.date && task.date < ts ? ' (atrasada)' : task.date === ts ? ' (para hoy)' : '';
-      options.push({ icon: '☷', text: `Avanzar con «${esc(task.name)}»${sp ? ' · ' + esc(sp.name) : ''}${late}` });
+      options.push({ icon: '☷', text: `Avanzar con «${esc(task.name)}»${sp ? ' · ' + esc(sp.name) : ''}${minOf(task) ? ' · ⏱ ' + dur(minOf(task)) : ''}${prioOf(task) === 'Alta' ? ' · prioridad alta' : ''}${late}` });
     }
     const evening = start >= 20 * 60;
     const acts = data.activities
@@ -169,7 +197,7 @@ function renderHome() {
         || '<div class="empty">Hoy no te quedan huecos libres. Disfruta lo que tienes en la agenda.</div>'}
     </section>
     <section class="panel suggestion">
-      <div><p class="eyebrow">UNA IDEA PARA TU TIEMPO LIBRE</p><h2>¿Un ratito para ti?</h2><p class="muted">Brain Stack puede ayudarte a elegir algo que encaje con tu tiempo y energía.</p></div>
+      <div><p class="eyebrow">UNA IDEA PARA TU TIEMPO LIBRE</p><h2>¿Un ratito para ti?</h2><p class="muted">Tus hobbies pueden ayudarte a elegir algo que encaje con tu tiempo y energía.</p></div>
       <button class="primary" data-act="go" data-id="brain">Buscar un plan ✧</button>
     </section>`;
 }
@@ -179,7 +207,7 @@ function spaceCard(sp) {
   const id = sp ? sp.id : '';
   const list = data.tasks
     .filter(t => sp ? same(t.spaceId, sp.id) : !t.spaceId || !byId(data.spaces, t.spaceId))
-    .sort((a, b) => (a.done - b.done) || (a.date || '9999').localeCompare(b.date || '9999'));
+    .sort((a, b) => (a.done - b.done) || (PRIO_RANK[prioOf(a)] - PRIO_RANK[prioOf(b)]) || (a.date || '9999').localeCompare(b.date || '9999'));
   const pend = list.filter(t => !t.done).length;
   const name = sp ? sp.name : 'General';
   const color = sp ? sp.color : '#e6eee6';
@@ -190,8 +218,11 @@ function spaceCard(sp) {
     <form class="form-row mini" data-form="task-form">
       <input type="hidden" name="space" value="${esc(id)}">
       <input class="field" name="name" placeholder="Nueva tarea…" required aria-label="Nueva tarea">
-      <input class="field date" name="date" type="date" value="${today()}" aria-label="Fecha">
-      <button class="primary" aria-label="Añadir tarea">+</button>
+      <div class="mini-row">
+        <input class="field date" name="date" type="date" value="${today()}" aria-label="Fecha">
+        ${minutesSelect(0)}${prioritySelect('Media')}
+        <button class="primary" aria-label="Añadir tarea">+</button>
+      </div>
     </form>
     ${sp ? `<div class="card-actions"><button class="text-button" data-act="rename-space" data-id="${esc(sp.id)}">Renombrar</button><button class="text-button danger" data-act="del-space" data-id="${esc(sp.id)}">Eliminar</button></div>` : ''}
   </article>`;
@@ -328,17 +359,17 @@ function importICS(text) {
   return added;
 }
 
-/* ---------- Brain Stack ---------- */
+/* ---------- Hobbies ---------- */
 function renderBrain() {
   const edit = byId(data.activities, ui.editActivity);
   const stacks = [...new Set(data.activities.map(a => a.stack))];
   const v = edit || { name: '', stack: '', minutes: 20, energy: 'Baja', tags: '' };
-  $('#app').innerHTML = head('Brain Stack', 'Tus hobbies organizados para que elegir qué hacer sea más fácil.') + `
+  $('#app').innerHTML = head('Hobbies', 'Tus hobbies organizados por categorías para que elegir qué hacer sea más fácil.') + `
     <section class="panel">
-      <h2>${edit ? 'Editar actividad' : 'Añade una actividad'}</h2>
+      <h2>${edit ? 'Editar hobby' : 'Añade un hobby'}</h2>
       <form id="activity-form" class="form-row">
         <input class="field" name="name" placeholder="Ej. Hacer un puzzle" value="${esc(v.name)}" required>
-        <input class="field" name="stack" list="stack-list" placeholder="Stack: sofá, creatividad..." value="${esc(v.stack)}" required>
+        <input class="field" name="stack" list="stack-list" placeholder="Categoría: sofá, creatividad..." value="${esc(v.stack)}" required>
         <datalist id="stack-list">${stacks.map(s => `<option value="${esc(s)}">`).join('')}</datalist>
         <input class="field" name="minutes" type="number" min="5" max="300" value="${esc(v.minutes)}" aria-label="Minutos">
         <select name="energy" aria-label="Energía">${opts(ENERGY, v.energy)}</select>
@@ -347,14 +378,14 @@ function renderBrain() {
         ${edit ? '<button type="button" class="text-button" data-act="cancel-edit">Cancelar</button>' : ''}
       </form>
     </section>
-    <div class="section-head"><div><p class="eyebrow">TUS ACTIVIDADES</p><h2>Mis stacks</h2></div></div>
+    <div class="section-head"><div><p class="eyebrow">TUS ACTIVIDADES</p><h2>Mis hobbies</h2></div></div>
     ${stacks.map(s => `
       <div class="stack-head"><h3>${esc(s)}</h3><button class="text-button" data-act="rename-stack" data-id="${esc(s)}">Renombrar</button></div>
       <div class="stack-grid">${data.activities.filter(a => a.stack === s).map(a => `
         <article class="stack-card${edit && same(edit.id, a.id) ? ' editing' : ''}"><span class="pill">${esc(a.stack)}</span><h3>${esc(a.name)}</h3>
           <p>${esc(a.minutes)} min · Energía ${esc(a.energy.toLowerCase())}</p><span class="tiny">${esc(a.tags || '')}</span>
           <div class="card-actions"><button class="text-button" data-act="edit-activity" data-id="${esc(a.id)}">Editar</button><button class="text-button danger" data-act="del-activity" data-id="${esc(a.id)}">Eliminar</button></div>
-        </article>`).join('')}</div>`).join('') || '<p class="empty">Aún no hay actividades. Añade la primera arriba.</p>'}
+        </article>`).join('')}</div>`).join('') || '<p class="empty">Aún no hay hobbies. Añade el primero arriba.</p>'}
     <section class="plan"><p class="eyebrow">PLAN SUGERIDO</p><h3>¿Qué encaja ahora?</h3><p class="muted">Dinos cuánto tiempo tienes y te proponemos una combinación.</p>
       <div class="form-row"><select id="free-time" aria-label="Tiempo"><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60" selected>1 hora</option><option value="90">1 hora y media</option></select>
       <select id="free-energy" aria-label="Energía">${opts(ENERGY, 'Baja')}</select><button class="primary" data-act="suggest">Buscar mi plan ✧</button></div>
@@ -371,8 +402,23 @@ function suggest() {
 }
 
 /* ---------- Mi espacio ---------- */
+function dumpRow(d) {
+  return `<div class="item dump-item"><div class="task-main"><span>${esc(d.text)}</span><div class="meta"><span class="meta-t">${fmtDate(d.created.slice(0, 10))}</span></div></div>
+    <div class="dump-actions"><select aria-label="Espacio de la tarea"><option value="">General</option>${data.spaces.map(sp => `<option value="${esc(sp.id)}">${esc(sp.name)}</option>`).join('')}</select>
+      <button class="text-button" data-act="dump-to-task" data-id="${esc(d.id)}">→ Tarea</button>
+      <button class="icon-btn" data-act="del-dump" data-id="${esc(d.id)}" aria-label="Borrar idea">×</button></div></div>`;
+}
 function renderSpace() {
+  const items = [...data.dump].sort((a, b) => b.created.localeCompare(a.created));
+  const note = ui.dumpNote; ui.dumpNote = '';
   $('#app').innerHTML = head('Mi espacio', 'Un lugar para tus notas, preferencias y pequeñas ideas.') + `
+    <section class="panel"><p class="eyebrow">BRAIN DUMP</p><h2>Vuelca tu cabeza</h2>
+      <p class="muted">Escribe sin ordenar todo lo que te ronde: pendientes, ideas, preocupaciones. Una idea por línea. Luego decides qué pasa a Mis tareas.</p>
+      <form id="dump-form" class="dump-form"><textarea class="field" name="text" rows="5" placeholder="Ej.&#10;Llamar al fontanero&#10;Mirar vuelos para la luna de miel&#10;Preparar el índice del TFM" required></textarea>
+        <button class="primary">Guardar ideas</button></form>
+      ${note ? `<p class="note">${esc(note)}</p>` : ''}
+      ${items.length ? `<div class="dump-list">${items.map(dumpRow).join('')}</div>` : '<p class="empty">Tu cabeza está despejada por ahora.</p>'}
+    </section>
     <section class="panel"><h2>Tu espacio personal</h2>
       <p class="muted">Esta versión guarda tus datos en este navegador. Puedes exportarlos como copia de seguridad.</p>
       <button class="primary" data-act="export">Exportar mis datos</button>
@@ -397,6 +443,17 @@ const actions = {
   },
   'edit-activity': id => { ui.editActivity = id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
   'cancel-edit': () => { ui.editActivity = null; render(); },
+  'del-dump': id => { data.dump = data.dump.filter(d => !same(d.id, id)); save(); render(); },
+  'dump-to-task': (id, btn) => {
+    const d = byId(data.dump, id); if (!d) return;
+    const sel = btn.parentElement.querySelector('select');
+    data.tasks.push({ id: uid(), name: d.text, date: '', spaceId: sel ? sel.value : '', minutes: 0, priority: 'Media', done: false });
+    data.dump = data.dump.filter(x => !same(x.id, id));
+    ui.dumpNote = `«${d.text}» ya está en Mis tareas. Allí puedes ponerle duración y prioridad.`;
+    save(); render();
+  },
+  'edit-task': id => { ui.editTask = id; render(); },
+  'cancel-task-edit': () => { ui.editTask = null; render(); },
   'del-activity': id => {
     const a = byId(data.activities, id);
     if (!a || !confirm(`¿Eliminar «${a.name}»?`)) return;
@@ -405,7 +462,7 @@ const actions = {
     save(); render();
   },
   'rename-stack': name => {
-    const n = prompt('Nuevo nombre del stack', name);
+    const n = prompt('Nuevo nombre de la categoría', name);
     if (n && n.trim()) { data.activities.forEach(a => { if (a.stack === name) a.stack = n.trim(); }); save(); render(); }
   },
   suggest,
@@ -429,8 +486,19 @@ const actions = {
 /* ---------- Formularios ---------- */
 const forms = {
   'task-form': f => {
-    data.tasks.push({ id: uid(), name: f.name.value.trim(), date: f.date.value, spaceId: f.space.value, done: false });
+    data.tasks.push({ id: uid(), name: f.name.value.trim(), date: f.date.value, spaceId: f.space.value, minutes: +f.minutes.value || 0, priority: f.priority.value, done: false });
     save(); render();
+  },
+  'dump-form': f => {
+    const n = new Date(), created = `${ymd(n)}T${hm(n)}`;
+    f.text.value.split(/\r?\n/).map(l => l.replace(/^[\s\-•*]+/, '').trim()).filter(Boolean)
+      .forEach(text => data.dump.push({ id: uid(), text, created }));
+    save(); render();
+  },
+  'task-edit-form': f => {
+    const t = byId(data.tasks, f.dataset.id); if (!t) return;
+    Object.assign(t, { name: f.name.value.trim(), date: f.date.value, spaceId: f.space.value, minutes: +f.minutes.value || 0, priority: f.priority.value });
+    ui.editTask = null; save(); render();
   },
   'space-form': f => {
     const name = f.name.value.trim(); if (!name) return;
