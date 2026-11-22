@@ -52,7 +52,7 @@ function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;
 const opts = (list, sel) => list.map(o => `<option${o === sel ? ' selected' : ''}>${esc(o)}</option>`).join('');
 
 /* ---------- Estado de interfaz ---------- */
-const ui = { view: 'today', taskSpace: 'all', editActivity: null, weekOffset: 0 };
+const ui = { view: 'today', calSettings: false, editActivity: null, weekOffset: 0 };
 
 function page(view) {
   ui.view = view;
@@ -100,11 +100,11 @@ function slotHtml(x) {
 }
 
 /* ---------- Mi día ---------- */
-function taskRow(t) {
+function taskRow(t, showSpace = true) {
   const sp = byId(data.spaces, t.spaceId);
   return `<div class="item"><input type="checkbox" data-task="${esc(t.id)}" ${t.done ? 'checked' : ''} aria-label="Hecha">
     <span class="${t.done ? 'done' : ''}">${esc(t.name)}</span>
-    ${sp ? `<span class="pill" style="background:${sp.color}">${esc(sp.name)}</span>` : ''}
+    ${sp && showSpace ? `<span class="pill" style="background:${sp.color}">${esc(sp.name)}</span>` : ''}
     <small>${fmtDate(t.date)}</small>
     <button class="icon-btn" data-act="del-task" data-id="${esc(t.id)}" aria-label="Eliminar tarea">×</button></div>`;
 }
@@ -175,32 +175,36 @@ function renderHome() {
 }
 
 /* ---------- Tareas con espacios ---------- */
-function renderTasks() {
-  if (ui.taskSpace !== 'all' && !byId(data.spaces, ui.taskSpace)) ui.taskSpace = 'all';
-  const cur = byId(data.spaces, ui.taskSpace);
+function spaceCard(sp) {
+  const id = sp ? sp.id : '';
   const list = data.tasks
-    .filter(t => !cur || same(t.spaceId, cur.id))
+    .filter(t => sp ? same(t.spaceId, sp.id) : !t.spaceId || !byId(data.spaces, t.spaceId))
     .sort((a, b) => (a.done - b.done) || (a.date || '9999').localeCompare(b.date || '9999'));
-  const count = id => data.tasks.filter(t => !t.done && (id === 'all' || same(t.spaceId, id))).length;
+  const pend = list.filter(t => !t.done).length;
+  const name = sp ? sp.name : 'General';
+  const color = sp ? sp.color : '#e6eee6';
+  return `<article class="stack-card space-card">
+    <div class="space-top"><span class="pill" style="background:${color}">${esc(name)}</span><small>${pend} pendiente${pend === 1 ? '' : 's'}</small></div>
+    <h3>${esc(name)}</h3>
+    <div class="space-tasks">${list.map(t => taskRow(t, false)).join('') || '<p class="empty small">Sin tareas todavía</p>'}</div>
+    <form class="form-row mini" data-form="task-form">
+      <input type="hidden" name="space" value="${esc(id)}">
+      <input class="field" name="name" placeholder="Nueva tarea…" required aria-label="Nueva tarea">
+      <input class="field date" name="date" type="date" value="${today()}" aria-label="Fecha">
+      <button class="primary" aria-label="Añadir tarea">+</button>
+    </form>
+    ${sp ? `<div class="card-actions"><button class="text-button" data-act="rename-space" data-id="${esc(sp.id)}">Renombrar</button><button class="text-button danger" data-act="del-space" data-id="${esc(sp.id)}">Eliminar</button></div>` : ''}
+  </article>`;
+}
+function renderTasks() {
+  const loose = data.tasks.some(t => !t.spaceId || !byId(data.spaces, t.spaceId));
   $('#app').innerHTML = head('Mis tareas', 'Saca las ideas de tu cabeza y dales un lugar.') + `
     <section class="panel">
-      <p class="eyebrow">ESPACIOS</p>
-      <div class="chips">
-        <button class="chip ${!cur ? 'active' : ''}" data-act="filter-space" data-id="all">Todas <em>${count('all')}</em></button>
-        ${data.spaces.map(s => `<button class="chip ${cur && same(cur.id, s.id) ? 'active' : ''}" style="--c:${s.color}" data-act="filter-space" data-id="${esc(s.id)}"><i></i>${esc(s.name)} <em>${count(s.id)}</em></button>`).join('')}
-      </div>
-      <form id="space-form" class="form-row"><input class="field" name="name" placeholder="Nuevo espacio: Trabajo, Máster, Boda…" required maxlength="40"><button class="primary">Crear espacio</button></form>
-      ${cur ? `<div class="form-row"><button class="text-button" data-act="rename-space">Renombrar «${esc(cur.name)}»</button><button class="text-button danger" data-act="del-space">Eliminar espacio</button></div>` : ''}
+      <h2>Crea un espacio</h2>
+      <form id="space-form" class="form-row"><input class="field" name="name" placeholder="Ej. Trabajo, Máster, Boda…" required maxlength="40"><button class="primary">Guardar</button></form>
     </section>
-    <section class="panel">
-      <form id="task-form" class="form-row">
-        <input class="field" name="name" placeholder="¿Qué tienes que hacer?" required>
-        <select name="space" aria-label="Espacio"><option value="">Sin espacio</option>${data.spaces.map(s => `<option value="${esc(s.id)}"${cur && same(cur.id, s.id) ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
-        <input class="field" name="date" type="date" value="${today()}">
-        <button class="primary">Añadir tarea</button>
-      </form>
-      <div>${list.map(taskRow).join('') || '<p class="empty">Tu lista está despejada.</p>'}</div>
-    </section>`;
+    <div class="section-head"><div><p class="eyebrow">TUS ESPACIOS</p><h2>Mis tareas</h2></div></div>
+    <div class="stack-grid">${data.spaces.map(spaceCard).join('')}${loose || !data.spaces.length ? spaceCard(null) : ''}</div>`;
 }
 
 /* ---------- Calendario ---------- */
@@ -221,7 +225,7 @@ function renderCalendar() {
   $('#app').innerHTML = head('Mi calendario', 'Tu semana de un vistazo, con los huecos que te quedan libres.') + `
     <section class="panel">
       <div class="section-head"><div><p class="eyebrow">SEMANA</p><h2>${esc(range)}</h2></div>
-        <div class="week-nav"><button class="icon-btn" data-act="week-prev" aria-label="Semana anterior">‹</button><button class="text-button" data-act="week-today">Hoy</button><button class="icon-btn" data-act="week-next" aria-label="Semana siguiente">›</button></div></div>
+        <div class="week-nav"><button class="text-button" data-act="toggle-settings">⚙ ${ui.calSettings ? 'Cerrar ajustes' : 'Ajustes'}</button><button class="icon-btn" data-act="week-prev" aria-label="Semana anterior">‹</button><button class="text-button" data-act="week-today">Hoy</button><button class="icon-btn" data-act="week-next" aria-label="Semana siguiente">›</button></div></div>
       <div class="week">${days.map(d => {
         const ds = ymd(d), info = dayInfo(ds);
         return `<article class="day ${ds === ts ? 'today' : ''}">
@@ -233,6 +237,7 @@ function renderCalendar() {
       }).join('')}</div>
     </section>
 
+    ${ui.calSettings ? `
     <section class="panel">
       <p class="eyebrow">HORARIO FIJO</p><h2>Trabajo, clases y rutinas</h2>
       <p class="muted">Lo que se repite cada semana. Se bloquea solo en los días que elijas.</p>
@@ -246,6 +251,16 @@ function renderCalendar() {
       </form>
     </section>
 
+    <section class="panel">
+      <p class="eyebrow">AJUSTES</p><h2>Tu jornada</h2>
+      <p class="muted">Los huecos libres se calculan dentro de este margen horario.</p>
+      <form id="settings-form" class="form-row">
+        <label class="inline">Empiezo a las <input class="field" name="dayStart" type="time" value="${esc(data.settings.dayStart)}" required></label>
+        <label class="inline">Termino a las <input class="field" name="dayEnd" type="time" value="${esc(data.settings.dayEnd)}" required></label>
+        <button class="primary">Guardar</button>
+      </form>
+    </section>
+    ` : ''}
     <section class="panel">
       <p class="eyebrow">PLANES</p><h2>Añadir un plan</h2>
       <form id="event-form" class="form-row">
@@ -266,16 +281,6 @@ function renderCalendar() {
       <label class="primary file-btn">Importar archivo .ics<input type="file" id="import-ics" accept=".ics,text/calendar" hidden></label>
       ${importedCount ? `<button class="text-button danger" data-act="clear-ics">Quitar los ${importedCount} eventos importados</button>` : ''}
       <p class="tiny">Una sincronización automática y continua con Google necesita un servidor y la autorización de tu cuenta; esta versión funciona solo en tu dispositivo.</p>
-    </section>
-
-    <section class="panel">
-      <p class="eyebrow">AJUSTES</p><h2>Tu jornada</h2>
-      <p class="muted">Los huecos libres se calculan dentro de este margen horario.</p>
-      <form id="settings-form" class="form-row">
-        <label class="inline">Empiezo a las <input class="field" name="dayStart" type="time" value="${esc(data.settings.dayStart)}" required></label>
-        <label class="inline">Termino a las <input class="field" name="dayEnd" type="time" value="${esc(data.settings.dayEnd)}" required></label>
-        <button class="primary">Guardar</button>
-      </form>
     </section>`;
 }
 
@@ -377,19 +382,18 @@ function renderSpace() {
 /* ---------- Acciones (clics) ---------- */
 const actions = {
   go: id => page(id),
-  'filter-space': id => { ui.taskSpace = id; render(); },
   'del-task': id => { data.tasks = data.tasks.filter(t => !same(t.id, id)); save(); render(); },
-  'rename-space': () => {
-    const s = byId(data.spaces, ui.taskSpace); if (!s) return;
+  'rename-space': id => {
+    const s = byId(data.spaces, id); if (!s) return;
     const n = prompt('Nuevo nombre del espacio', s.name);
     if (n && n.trim()) { s.name = n.trim(); save(); render(); }
   },
-  'del-space': () => {
-    const s = byId(data.spaces, ui.taskSpace); if (!s) return;
+  'del-space': id => {
+    const s = byId(data.spaces, id); if (!s) return;
     if (!confirm(`¿Eliminar el espacio «${s.name}»? Sus tareas se mantienen, pero sin espacio.`)) return;
     data.tasks.forEach(t => { if (same(t.spaceId, s.id)) t.spaceId = ''; });
     data.spaces = data.spaces.filter(x => !same(x.id, s.id));
-    ui.taskSpace = 'all'; save(); render();
+    save(); render();
   },
   'edit-activity': id => { ui.editActivity = id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
   'cancel-edit': () => { ui.editActivity = null; render(); },
@@ -405,6 +409,7 @@ const actions = {
     if (n && n.trim()) { data.activities.forEach(a => { if (a.stack === name) a.stack = n.trim(); }); save(); render(); }
   },
   suggest,
+  'toggle-settings': () => { ui.calSettings = !ui.calSettings; render(); },
   'week-prev': () => { ui.weekOffset--; render(); },
   'week-next': () => { ui.weekOffset++; render(); },
   'week-today': () => { ui.weekOffset = 0; render(); },
@@ -430,7 +435,7 @@ const forms = {
   'space-form': f => {
     const name = f.name.value.trim(); if (!name) return;
     const sp = { id: uid(), name, color: COLORS[data.spaces.length % COLORS.length] };
-    data.spaces.push(sp); ui.taskSpace = sp.id; save(); render();
+    data.spaces.push(sp); save(); render();
   },
   'activity-form': f => {
     const item = { name: f.name.value.trim(), stack: f.stack.value.trim(), minutes: +f.minutes.value || 20, energy: f.energy.value, tags: f.tags.value.trim() };
@@ -464,7 +469,8 @@ app.addEventListener('click', e => {
 });
 app.addEventListener('submit', e => {
   e.preventDefault();
-  if (forms[e.target.id]) forms[e.target.id](e.target);
+  const fn = forms[e.target.dataset.form || e.target.id];
+  if (fn) fn(e.target);
 });
 app.addEventListener('change', async e => {
   const t = e.target;
