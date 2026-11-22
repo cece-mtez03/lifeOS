@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173f32">
+  <meta name="description" content="lifeOS: organiza tu vida a tu ritmo.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <title>lifeOS · Your life, in your rhythm</title>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="lifeOS inicio"><span class="brand-mark">l</span><span>life<span class="brand-os">OS</span></span></a>
+    <span class="tagline">YOUR LIFE, IN YOUR RHYTHM</span>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <p class="eyebrow">TU ESPACIO</p>
+      <nav>
+        <button class="nav active" data-view="today">◷ <span>Mi día</span></button>
+        <button class="nav" data-view="tasks">☷ <span>Mis tareas</span></button>
+        <button class="nav" data-view="calendar">▦ <span>Mi calendario</span></button>
+        <button class="nav" data-view="brain">✧ <span>Brain Stack</span></button>
+        <button class="nav" data-view="space">⌂ <span>Mi espacio</span></button>
+      </nav>
+      <div class="sidebar-note"><span>✦</span><p>Una vida organizada también deja espacio para disfrutarla.</p></div>
+      <p class="local-note">Versión inicial · Datos guardados en este dispositivo</p>
+    </aside>
+    <main id="app" class="main">
+      <section class="welcome">
+        <div><p class="eyebrow" id="date-label">TU ESPACIO, A TU RITMO</p><h1 id="greeting">Buenos días.</h1><p class="muted">Un paso cada vez. Lo importante también es vivir.</p></div>
+        <div class="sun">✺</div>
+      </section>
+      <section class="stats">
+        <article class="stat"><span class="eyebrow">TAREAS PENDIENTES</span><strong id="pending-count">0</strong><small>Sin prisa, pero sin perderlas</small></article>
+        <article class="stat"><span class="eyebrow">ACTIVIDADES EN TU STACK</span><strong id="activity-count">0</strong><small>Pequeños planes que te hacen bien</small></article>
+      </section>
+      <section class="panel">
+        <div class="section-head"><div><p class="eyebrow">HOY</p><h2>Tu lista de hoy</h2></div><button class="text-button" data-go="tasks">Ver tareas →</button></div>
+        <div id="today-tasks" class="empty">Todavía no has añadido tareas para hoy.</div>
+      </section>
+      <section class="panel suggestion">
+        <div><p class="eyebrow">UNA IDEA PARA TU TIEMPO LIBRE</p><h2>¿Un ratito para ti?</h2><p class="muted">Brain Stack puede ayudarte a elegir algo que encaje con tu tiempo y energía.</p></div>
+        <button class="primary" data-go="brain">Buscar un plan ✧</button>
+      </section>
+    </main>
+  </div>
+  <footer>lifeOS <span>·</span> Your life, in your rhythm</footer>
+  <script src="app.js"></script>
+</body>
+</html>
