@@ -1,7 +1,7 @@
 'use strict';
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const KEY = 'lifeos-v1';
+const KEY = 'lifeos-v1'; // nombre interno antiguo: no cambiar, o se perderían los datos ya guardados
 const DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const DAY_SHORT = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
@@ -33,7 +33,24 @@ function normalize(raw) {
 }
 let data;
 try { data = normalize(JSON.parse(localStorage.getItem(KEY))); } catch { data = normalize(null); }
-function save() { localStorage.setItem(KEY, JSON.stringify(data)); }
+function save() {
+  data.meta = { updatedAt: Date.now() };
+  try { localStorage.setItem(KEY, JSON.stringify(data)); } catch {}
+  if (window.LifeSync) window.LifeSync.push();
+}
+/* Puente con sync.js (inicio de sesión y sincronización) */
+window.LifeApp = {
+  get: () => data,
+  pristine: () => !(data.meta && data.meta.updatedAt),
+  apply(raw) { // sustituye los datos locales sin volver a subirlos
+    data = normalize(raw);
+    try { localStorage.setItem(KEY, JSON.stringify(data)); } catch {}
+    applyTheme();
+    const a = document.activeElement;
+    if (!(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && $('#app').contains(a))) render();
+  },
+  reset() { data = normalize(null); try { localStorage.removeItem(KEY); } catch {} applyTheme(); render(); }
+};
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const same = (a, b) => String(a) === String(b);
 const byId = (arr, id) => arr.find(x => same(x.id, id));
@@ -128,7 +145,7 @@ function render() {
   $$('.nav').forEach(b => b.classList.toggle('active', b.dataset.view === ui.view));
   ({ today: renderHome, tasks: renderTasks, calendar: renderCalendar, brain: renderBrain, space: renderSpace }[ui.view] || renderHome)();
 }
-const head = (t, sub) => `<p class="eyebrow">LIFEOS</p><h1 class="view-title">${t}</h1><p class="view-intro">${sub}</p>`;
+const head = (t, sub) => `<p class="eyebrow">PLANET ME</p><h1 class="view-title">${t}</h1><p class="view-intro">${sub}</p>`;
 
 /* ---------- Calendario: cálculo de bloques y huecos ---------- */
 function dayInfo(ds) {
@@ -474,6 +491,28 @@ function dumpRow(d) {
       <button class="text-button" data-act="dump-to-task" data-id="${esc(d.id)}">→ Tarea</button>
       <button class="icon-btn" data-act="del-dump" data-id="${esc(d.id)}" aria-label="Borrar idea">×</button></div></div>`;
 }
+function accountInner() {
+  const S = window.LifeSync && window.LifeSync.state;
+  const top = '<p class="eyebrow">CUENTA</p><h2>Tu cuenta y sincronización</h2>';
+  if (S && S.loading) return top + '<p class="muted">Comprobando tu cuenta…</p>';
+  if (!S || !S.configured) return top + '<p class="muted">La sincronización entre dispositivos todavía no está activada: tus datos se guardan solo en este dispositivo.</p>';
+  if (!S.ready) return top + `<p class="muted">${esc(S.error || 'No se ha podido conectar con el servicio de Google.')} Tus datos siguen guardados en este dispositivo.</p>`;
+  const err = (S.error ? `<p class="note warn">${esc(S.error)}</p>` : '') + (S.info ? `<p class="note">${esc(S.info)}</p>` : '');
+  if (!S.user) return top + `<p class="muted">Entra con Google para tener tus tareas, hobbies y calendario en todos tus dispositivos.</p>
+    <button class="primary" data-act="sync-signin">Entrar con Google</button>${err}`;
+  const stat = S.status === 'syncing' ? 'Sincronizando…' : S.status === 'offline' ? 'Sin conexión: los cambios se subirán al volver.'
+    : S.status === 'error' ? 'No se ha podido sincronizar.' : S.lastSync ? `Sincronizado a las ${hm(new Date(S.lastSync))}` : 'Conectado';
+  const conflict = S.conflict ? `<div class="note"><b>Hay datos distintos en la nube y en este dispositivo.</b> ¿Qué quieres hacer? (Se guarda antes una copia de seguridad de lo de este dispositivo.)</div>
+    <div class="conflict-actions"><button class="primary" data-act="sync-resolve" data-id="merge">Combinar ambos</button>
+    <button class="text-button" data-act="sync-resolve" data-id="cloud">Usar los de la nube</button>
+    <button class="text-button" data-act="sync-resolve" data-id="local">Usar los de este dispositivo</button></div>` : '';
+  return top + `<div class="account-user">${S.user.photo ? `<img src="${esc(S.user.photo)}" alt="" referrerpolicy="no-referrer">` : ''}
+      <div><b>${esc(S.user.name || 'Tu cuenta')}</b><small>${esc(S.user.email)}</small></div></div>
+    <p class="muted">${stat}</p>${conflict}${err}
+    <div class="card-actions"><button class="text-button" data-act="sync-signout">Cerrar sesión</button>
+      <button class="text-button danger" data-act="sync-delete">Borrar mis datos de la nube</button></div>`;
+}
+window.addEventListener('lifesync', () => { const el = $('#account-panel'); if (el) el.innerHTML = accountInner(); });
 function renderSpace() {
   const items = [...data.dump].sort((a, b) => b.created.localeCompare(a.created));
   const note = ui.dumpNote; ui.dumpNote = '';
@@ -485,6 +524,7 @@ function renderSpace() {
       ${note ? `<p class="note">${esc(note)}</p>` : ''}
       ${items.length ? `<div class="dump-list">${items.map(dumpRow).join('')}</div>` : '<p class="empty">Tu cabeza está despejada por ahora.</p>'}
     </section>
+    <section class="panel" id="account-panel">${accountInner()}</section>
     <section class="panel"><p class="eyebrow">APARIENCIA</p><h2>Tu ambiente</h2>
       <p class="muted">Los colores cambian solos con la estación del año y con el momento del día (mañana, tarde y noche). Si prefieres, fija uno.</p>
       <form id="theme-form" class="form-row">
@@ -515,6 +555,16 @@ const actions = {
   },
   'edit-activity': id => { ui.editActivity = id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
   'cancel-edit': () => { ui.editActivity = null; render(); },
+  'sync-signin': () => window.LifeSync && window.LifeSync.signIn(),
+  'sync-signout': () => {
+    if (!window.LifeSync) return;
+    const clear = confirm('¿Quieres borrar también los datos de este dispositivo? Seguirán guardados en tu cuenta.\n\nAceptar: borrarlos de aquí.\nCancelar: conservarlos en este dispositivo.');
+    window.LifeSync.signOut(clear);
+  },
+  'sync-resolve': id => window.LifeSync && window.LifeSync.resolve(id),
+  'sync-delete': () => {
+    if (window.LifeSync && confirm('¿Borrar tus datos de la nube y cerrar sesión? Los datos de este dispositivo no se tocan.')) window.LifeSync.deleteCloud();
+  },
   'del-dump': id => { data.dump = data.dump.filter(d => !same(d.id, id)); save(); render(); },
   'dump-to-task': (id, btn) => {
     const d = byId(data.dump, id); if (!d) return;
@@ -550,7 +600,7 @@ const actions = {
   },
   export: () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'lifeos-backup.json'; a.click();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'planet-me-backup.json'; a.click();
     URL.revokeObjectURL(a.href);
   }
 };

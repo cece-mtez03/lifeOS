@@ -85,3 +85,11 @@ body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .chip.active,.days input:checked+span{color:var(--ontop)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 .week-nav .text-button{white-space:nowrap}
+/* v7: cuenta y sincronización */
+.account-user{display:flex;align-items:center;gap:12px;margin:10px 0 4px}.account-user img{width:42px;height:42px;border-radius:50%;object-fit:cover}
+.account-user b{display:block;font-size:14px}.account-user small{color:var(--muted);font-size:12px}
+.conflict-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:8px 0}
+.note.warn{background:var(--alta-bg);color:var(--alta-fg)}
+/* v8: marca Planet Me */
+.brand-mark{border:0;border-radius:0;width:34px;height:34px;display:block;color:var(--ontop);font-size:0}
+.brand{gap:10px}
