@@ -15,7 +15,7 @@ const initial = {
   spaces: [],
   routines: [],
   events: [],
-  settings: { dayStart: '08:00', dayEnd: '22:00' },
+  settings: { dayStart: '08:00', dayEnd: '22:00', season: 'auto', phase: 'auto' },
   activities: [
     { id: 1, name: 'Murdoku', stack: 'Sofá', minutes: 20, energy: 'Baja', tags: 'sin preparar, sofá' },
     { id: 2, name: 'Leer un capítulo', stack: 'Desconexión', minutes: 30, energy: 'Baja', tags: 'sofá, tranquilo' },
@@ -28,7 +28,7 @@ const initial = {
 function normalize(raw) {
   const d = Object.assign(structuredClone(initial), raw && typeof raw === 'object' ? raw : {});
   ['tasks', 'activities', 'events', 'spaces', 'routines', 'dump'].forEach(k => { if (!Array.isArray(d[k])) d[k] = []; });
-  d.settings = Object.assign({ dayStart: '08:00', dayEnd: '22:00' }, d.settings);
+  d.settings = Object.assign({ dayStart: '08:00', dayEnd: '22:00', season: 'auto', phase: 'auto' }, d.settings);
   return d;
 }
 let data;
@@ -51,6 +51,70 @@ const fmtDate = s => s ? parseYmd(s).toLocaleDateString('es-ES', { day: 'numeric
 function mondayOf(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 const opts = (list, sel) => list.map(o => `<option${o === sel ? ' selected' : ''}>${esc(o)}</option>`).join('');
+
+/* ---------- Tema: estación y momento del día ---------- */
+const SEASONS = {
+  primavera: { name: 'Primavera', h: 142, bg: 62, ah: 340, glyph: '🌸', day: 'Un paso cada vez. Hoy huele a flores nuevas.', night: 'Ventana entreabierta y luz suave. Ya has hecho bastante.' },
+  verano: { name: 'Verano', h: 188, bg: 46, ah: 32, glyph: '☀️', day: 'Sin prisa. Hoy toca luz, sombra y algo fresquito.', night: 'Noche templada. Buen momento para bajar el ritmo.' },
+  otono: { name: 'Otoño', h: 18, bg: 36, ah: 42, glyph: '🍂', day: 'Un paso cada vez, con algo calentito en las manos.', night: 'Manta, luz cálida y cero prisas.' },
+  invierno: { name: 'Invierno', h: 212, bg: 32, ah: 36, glyph: '❄️', day: 'Abrígate y ve a tu ritmo. Lo importante también es vivir.', night: 'Fuera hace frío; aquí dentro, calorcito. Descansa.' }
+};
+const PHASES = ['manana', 'tarde', 'noche'];
+const NIGHT_START = { invierno: 18.5 * 60, otono: 19.5 * 60, primavera: 20.5 * 60, verano: 21.5 * 60 };
+function seasonOf(d) {
+  const md = (d.getMonth() + 1) * 100 + d.getDate();
+  return md >= 1221 || md < 320 ? 'invierno' : md < 621 ? 'primavera' : md < 923 ? 'verano' : 'otono';
+}
+function phaseOf(d, season) {
+  const m = d.getHours() * 60 + d.getMinutes();
+  return m >= NIGHT_START[season] || m < 7 * 60 ? 'noche' : m < 13 * 60 ? 'manana' : 'tarde';
+}
+function themeNow() {
+  const d = new Date(), t = data.settings;
+  const season = SEASONS[t.season] ? t.season : seasonOf(d);
+  const phase = PHASES.includes(t.phase) ? t.phase : phaseOf(d, season);
+  return { season, phase };
+}
+const themeGlyph = () => { const t = themeNow(); return t.phase === 'noche' ? '🌙' : SEASONS[t.season].glyph; };
+const themeLine = () => { const t = themeNow(); return SEASONS[t.season][t.phase === 'noche' ? 'night' : 'day']; };
+function applyTheme() {
+  const { season, phase } = themeNow();
+  const S = SEASONS[season], h = S.h, bg = S.bg;
+  const L = (hue, sat, l, a) => a === undefined ? `hsl(${hue}, ${sat}%, ${l}%)` : `hsla(${hue}, ${sat}%, ${l}%, ${a})`;
+  let v;
+  if (phase !== 'noche') {
+    const tarde = phase === 'tarde';
+    v = {
+      '--forest': L(h, 42, 22), '--forest2': L(h, 34, 33), '--head': L(h, 42, 22), '--head2': L(h, 34, 33),
+      '--cream': L(bg, tarde ? 52 : 40, tarde ? 91 : 95), '--paper': L(bg, 60, 98), '--field': L(bg, 60, 99),
+      '--ink': L(h, 24, 17), '--muted': L(h, 10, 42), '--faint': L(h, 8, 58),
+      '--line': L(bg, 26, 86), '--line2': L(h, 18, 78), '--sage': L(h, 24, 89), '--soft': L(h, 28, 92), '--soft2': L(h, 24, 88),
+      '--accent': L(S.ah, 45, 62), '--free': L(h, 22, 42), '--ontop': L(bg, 50, 95), '--topline': L(h, 22, 72), '--topsoft': L(h, 22, 80),
+      '--glow': tarde ? L(32, 95, 72, .38) : L(50, 95, 82, .45), '--glow2': L(S.ah, 70, 82, .28), '--shadow': L(h, 40, 20, .35),
+      '--routine-bg': L(210, 38, 90), '--routine-fg': L(210, 38, 26), '--event-bg': L(38, 70, 86), '--event-fg': L(32, 60, 24),
+      '--allday-bg': L(255, 35, 90), '--allday-fg': L(255, 32, 32), '--alta-bg': L(8, 60, 89), '--alta-fg': L(8, 50, 30),
+      '--baja-bg': L(h, 25, 89), '--baja-fg': L(h, 35, 28), '--danger': L(8, 48, 48)
+    };
+  } else {
+    v = {
+      '--forest': L(h, 34, 30), '--forest2': L(h, 32, 38), '--head': L(h, 38, 80), '--head2': L(h, 34, 72),
+      '--cream': L(h, 26, 9), '--paper': L(h, 22, 13), '--field': L(h, 20, 17),
+      '--ink': L(bg, 26, 90), '--muted': L(h, 12, 66), '--faint': L(h, 10, 52),
+      '--line': L(h, 18, 22), '--line2': L(h, 18, 30), '--sage': L(h, 20, 21), '--soft': L(h, 22, 17), '--soft2': L(h, 22, 23),
+      '--accent': L(S.ah, 55, 68), '--free': L(h, 30, 66), '--ontop': L(bg, 40, 92), '--topline': L(h, 22, 60), '--topsoft': L(h, 25, 72),
+      '--glow': L(h, 60, 38, .20), '--glow2': L(S.ah, 60, 46, .10), '--shadow': 'rgba(0, 0, 0, .5)',
+      '--routine-bg': L(210, 28, 22), '--routine-fg': L(210, 45, 82), '--event-bg': L(36, 40, 22), '--event-fg': L(38, 70, 82),
+      '--allday-bg': L(255, 22, 24), '--allday-fg': L(255, 50, 86), '--alta-bg': L(8, 32, 24), '--alta-fg': L(8, 70, 84),
+      '--baja-bg': L(h, 22, 22), '--baja-fg': L(h, 40, 80), '--danger': L(8, 65, 68)
+    };
+  }
+  const root = document.documentElement;
+  if (!root) return;
+  for (const k in v) root.style.setProperty(k, v[k]);
+  root.dataset.season = season; root.dataset.phase = phase;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', v['--forest']);
+}
 
 /* ---------- Estado de interfaz ---------- */
 const ui = { view: 'today', dumpNote: '', editTask: null, calSettings: false, editActivity: null, weekOffset: 0 };
@@ -170,19 +234,19 @@ function suggestionsForToday(info, nowMin) {
 }
 function renderHome() {
   const d = new Date(), h = d.getHours(), ts = today();
-  const greeting = h < 12 ? 'Buenos días.' : h < 20 ? 'Buenas tardes.' : 'Buenas noches.';
+  const greeting = { manana: 'Buenos días.', tarde: 'Buenas tardes.', noche: 'Buenas noches.' }[themeNow().phase];
   const todays = data.tasks.filter(t => t.date === ts);
   const info = dayInfo(ts);
   const slots = info.slots.filter(x => x.kind !== 'free' || x.e > d.getHours() * 60 + d.getMinutes());
   $('#app').innerHTML = `
-    <section class="welcome"><div><p class="eyebrow">${esc(d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase())}</p><h1>${greeting}</h1><p class="muted">Un paso cada vez. Lo importante también es vivir.</p></div><div class="sun">✺</div></section>
+    <section class="welcome"><div><p class="eyebrow">${esc(d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase())}</p><h1>${greeting}</h1><p class="muted">${esc(themeLine())}</p></div><div class="sun" aria-hidden="true">${themeGlyph()}</div></section>
     <section class="stats">
       <article class="stat"><span class="eyebrow">TAREAS PENDIENTES</span><strong>${data.tasks.filter(t => !t.done).length}</strong><small>Sin prisa, pero sin perderlas</small></article>
       <article class="stat"><span class="eyebrow">TIEMPO LIBRE HOY</span><strong>${dur(info.freeTotal)}</strong><small>Entre tus planes y tu horario</small></article>
     </section>
     <section class="panel">
       <div class="section-head"><div><p class="eyebrow">HOY</p><h2>Tu lista de hoy</h2></div><button class="text-button" data-act="go" data-id="tasks">Ver tareas →</button></div>
-      ${todays.length ? todays.map(taskRow).join('') : '<div class="empty">Todavía no has añadido tareas para hoy.</div>'}
+      ${todays.length ? todays.map(t => taskRow(t)).join('') : '<div class="empty">Todavía no has añadido tareas para hoy.</div>'}
     </section>
     <section class="panel">
       <div class="section-head"><div><p class="eyebrow">AGENDA</p><h2>Tu día</h2></div><button class="text-button" data-act="go" data-id="calendar">Ver semana →</button></div>
@@ -313,6 +377,8 @@ function renderCalendar() {
       ${importedCount ? `<button class="text-button danger" data-act="clear-ics">Quitar los ${importedCount} eventos importados</button>` : ''}
       <p class="tiny">Una sincronización automática y continua con Google necesita un servidor y la autorización de tu cuenta; esta versión funciona solo en tu dispositivo.</p>
     </section>`;
+  const wk = $('.week'), td = $('.day.today');
+  if (wk && td && wk.scrollWidth > wk.clientWidth) wk.scrollLeft = Math.max(0, td.offsetLeft - wk.offsetLeft - 4);
 }
 
 /* ---------- Importar .ics ---------- */
@@ -419,6 +485,12 @@ function renderSpace() {
       ${note ? `<p class="note">${esc(note)}</p>` : ''}
       ${items.length ? `<div class="dump-list">${items.map(dumpRow).join('')}</div>` : '<p class="empty">Tu cabeza está despejada por ahora.</p>'}
     </section>
+    <section class="panel"><p class="eyebrow">APARIENCIA</p><h2>Tu ambiente</h2>
+      <p class="muted">Los colores cambian solos con la estación del año y con el momento del día (mañana, tarde y noche). Si prefieres, fija uno.</p>
+      <form id="theme-form" class="form-row">
+        <select name="season" aria-label="Estación"><option value="auto">Estación: automática</option>${Object.keys(SEASONS).map(k => `<option value="${k}"${data.settings.season === k ? ' selected' : ''}>${SEASONS[k].name}</option>`).join('')}</select>
+        <select name="phase" aria-label="Momento del día"><option value="auto">Momento: automático</option>${[['manana', 'Mañana'], ['tarde', 'Tarde'], ['noche', 'Noche']].map(([k, n]) => `<option value="${k}"${data.settings.phase === k ? ' selected' : ''}>${n}</option>`).join('')}</select>
+      </form></section>
     <section class="panel"><h2>Tu espacio personal</h2>
       <p class="muted">Esta versión guarda tus datos en este navegador. Puedes exportarlos como copia de seguridad.</p>
       <button class="primary" data-act="export">Exportar mis datos</button>
@@ -525,7 +597,7 @@ const forms = {
   },
   'settings-form': f => {
     if (toMin(f.dayEnd.value) <= toMin(f.dayStart.value)) { alert('El final de la jornada debe ser posterior al inicio.'); return; }
-    data.settings = { dayStart: f.dayStart.value, dayEnd: f.dayEnd.value };
+    Object.assign(data.settings, { dayStart: f.dayStart.value, dayEnd: f.dayEnd.value });
     save(); render();
   }
 };
@@ -545,6 +617,9 @@ app.addEventListener('change', async e => {
   if (t.dataset.task !== undefined) {
     const task = byId(data.tasks, t.dataset.task);
     if (task) { task.done = t.checked; save(); render(); }
+  } else if (t.closest && t.closest('#theme-form')) {
+    data.settings.season = t.form.season.value; data.settings.phase = t.form.phase.value;
+    save(); applyTheme(); render();
   } else if (t.id === 'import-ics' && t.files[0]) {
     try {
       const n = importICS(await t.files[0].text());
@@ -558,6 +633,9 @@ app.addEventListener('change', async e => {
 
 $$('.nav').forEach(b => b.onclick = () => page(b.dataset.view));
 $('.brand').addEventListener('click', e => { e.preventDefault(); page('today'); });
+applyTheme();
 render();
+setInterval(applyTheme, 10 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) applyTheme(); });
 
 if ('serviceWorker' in navigator) { window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {})); }
