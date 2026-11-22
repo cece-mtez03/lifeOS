@@ -2,7 +2,7 @@
 
 **Your life, in your rhythm.**
 
-Primera versión PWA de lifeOS. Incluye navegación responsive, tareas, calendario sencillo, Brain Stack y exportación/importación de datos.
+PWA de lifeOS. Incluye: tareas organizadas por espacios (trabajo, máster, boda…), calendario semanal con huecos libres y horario fijo, importación de Google Calendar (.ics), Brain Stack editable y exportación/importación de datos.
 
 ## Publicar con GitHub Pages
 1. Crea un repositorio público llamado `lifeos`.
