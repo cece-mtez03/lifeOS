@@ -93,3 +93,15 @@ body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 /* v8: marca Planet Me */
 .brand-mark{border:0;border-radius:0;width:34px;height:34px;display:block;color:var(--ontop);font-size:0}
 .brand{gap:10px}
+/* v9: acceso con Google visible */
+[hidden]{display:none!important}
+.top-right{display:flex;align-items:center;gap:18px}
+.top-account{display:inline-flex;align-items:center;gap:8px;background:transparent;color:var(--ontop);border:1px solid var(--topline);border-radius:999px;padding:7px 14px;font:600 12px 'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;transition:background-color .2s}
+.top-account:hover{background:rgba(255,255,255,.12)}
+.top-account.signed{padding:4px 12px 4px 4px}
+.top-account img,.top-account i{width:26px;height:26px;border-radius:50%;object-fit:cover;flex:none}
+.top-account i{display:grid;place-items:center;font-style:normal;background:var(--topsoft);color:var(--forest);font-size:12px}
+.top-account.warn{border-color:var(--accent)}
+.signin-actions{display:flex;flex-direction:column;align-items:center;gap:4px}.signin-actions .text-button{font-size:12px}
+@media(max-width:760px){.tagline{display:none}.top-account{padding:6px 11px}.signin-actions{align-items:flex-start;flex-direction:row;gap:12px}}
+.signin-actions .primary{white-space:nowrap}

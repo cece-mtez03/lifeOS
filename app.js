@@ -249,6 +249,25 @@ function suggestionsForToday(info, nowMin) {
   }
   return out;
 }
+const HIDE_SIGNIN_KEY = 'planetme-hide-signin';
+function showSignin() {
+  const S = window.LifeSync && window.LifeSync.state;
+  if (!S || !S.configured || !S.ready || S.user) return false;
+  try { return !localStorage.getItem(HIDE_SIGNIN_KEY); } catch { return true; }
+}
+/* Botón de cuenta en la cabecera: siempre visible */
+function renderTopAccount() {
+  const el = $('#top-account'); if (!el) return;
+  const S = window.LifeSync && window.LifeSync.state;
+  if (!S || S.loading || !S.configured || !S.ready) { el.hidden = true; return; }
+  el.hidden = false;
+  if (!S.user) { el.className = 'top-account'; el.title = 'Entrar con Google'; el.innerHTML = '<span>Entrar con Google</span>'; return; }
+  const name = (S.user.name || S.user.email || '').split(' ')[0];
+  const stat = S.status === 'syncing' ? 'Sincronizando…' : S.status === 'offline' ? 'Sin conexión' : S.status === 'error' ? 'Error al sincronizar' : 'Sincronizado';
+  el.className = 'top-account signed' + (S.status === 'error' || S.status === 'offline' ? ' warn' : '');
+  el.title = `${S.user.email} · ${stat}`;
+  el.innerHTML = (S.user.photo ? `<img src="${esc(S.user.photo)}" alt="" referrerpolicy="no-referrer">` : `<i>${esc((name[0] || '?').toUpperCase())}</i>`) + `<span>${esc(name)}</span>`;
+}
 function renderHome() {
   const d = new Date(), h = d.getHours(), ts = today();
   const greeting = { manana: 'Buenos días.', tarde: 'Buenas tardes.', noche: 'Buenas noches.' }[themeNow().phase];
@@ -261,6 +280,11 @@ function renderHome() {
       <article class="stat"><span class="eyebrow">TAREAS PENDIENTES</span><strong>${data.tasks.filter(t => !t.done).length}</strong><small>Sin prisa, pero sin perderlas</small></article>
       <article class="stat"><span class="eyebrow">TIEMPO LIBRE HOY</span><strong>${dur(info.freeTotal)}</strong><small>Entre tus planes y tu horario</small></article>
     </section>
+    ${showSignin() ? `<section class="panel suggestion signin-card">
+      <div><p class="eyebrow">TUS DATOS, EN TODAS PARTES</p><h2>Entra para no perder nada</h2>
+        <p class="muted">Con tu cuenta de Google, tus tareas y planes se guardan y se sincronizan entre tu móvil y tu ordenador.</p></div>
+      <div class="signin-actions"><button class="primary" data-act="sync-signin">Entrar con Google</button><button class="text-button" data-act="signin-dismiss">Ahora no</button></div>
+    </section>` : ''}
     <section class="panel">
       <div class="section-head"><div><p class="eyebrow">HOY</p><h2>Tu lista de hoy</h2></div><button class="text-button" data-act="go" data-id="tasks">Ver tareas →</button></div>
       ${todays.length ? todays.map(t => taskRow(t)).join('') : '<div class="empty">Todavía no has añadido tareas para hoy.</div>'}
@@ -512,7 +536,11 @@ function accountInner() {
     <div class="card-actions"><button class="text-button" data-act="sync-signout">Cerrar sesión</button>
       <button class="text-button danger" data-act="sync-delete">Borrar mis datos de la nube</button></div>`;
 }
-window.addEventListener('lifesync', () => { const el = $('#account-panel'); if (el) el.innerHTML = accountInner(); });
+window.addEventListener('lifesync', () => {
+  const el = $('#account-panel'); if (el) el.innerHTML = accountInner();
+  renderTopAccount();
+  if (ui.view === 'today') renderHome();
+});
 function renderSpace() {
   const items = [...data.dump].sort((a, b) => b.created.localeCompare(a.created));
   const note = ui.dumpNote; ui.dumpNote = '';
@@ -556,6 +584,7 @@ const actions = {
   'edit-activity': id => { ui.editActivity = id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
   'cancel-edit': () => { ui.editActivity = null; render(); },
   'sync-signin': () => window.LifeSync && window.LifeSync.signIn(),
+  'signin-dismiss': () => { try { localStorage.setItem(HIDE_SIGNIN_KEY, '1'); } catch {} render(); },
   'sync-signout': () => {
     if (!window.LifeSync) return;
     const clear = confirm('¿Quieres borrar también los datos de este dispositivo? Seguirán guardados en tu cuenta.\n\nAceptar: borrarlos de aquí.\nCancelar: conservarlos en este dispositivo.');
@@ -683,6 +712,13 @@ app.addEventListener('change', async e => {
 
 $$('.nav').forEach(b => b.onclick = () => page(b.dataset.view));
 $('.brand').addEventListener('click', e => { e.preventDefault(); page('today'); });
+$('#top-account').addEventListener('click', () => {
+  const S = window.LifeSync && window.LifeSync.state;
+  if (!S) return;
+  if (!S.user) { window.LifeSync.signIn(); return; }
+  page('space');
+  const p = $('#account-panel'); if (p) p.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 applyTheme();
 render();
 setInterval(applyTheme, 10 * 60 * 1000);
