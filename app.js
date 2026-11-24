@@ -101,8 +101,8 @@ function pickAlternatives(list, seed, n = 2) { // n opciones, de categorías dis
   for (const a of r) if (out.length < n && !out.includes(a)) out.push(a);
   return out;
 }
-function pickMix(list, budget) { // combinación que cabe en el tiempo: primero 1 por categoría, luego hasta 2
-  const ranked = rankActs(list), chosen = [];
+function pickMix(list, budget, seed) { // combinación que cabe en el tiempo: primero 1 por categoría, luego hasta 2
+  const ranked = rankActs(list, seed), chosen = [];
   let left = budget;
   for (const pass of [1, 2]) {
     for (const a of ranked) {
@@ -187,7 +187,7 @@ function applyTheme() {
 }
 
 /* ---------- Estado de interfaz ---------- */
-const ui = { editRoutine: null, view: 'today', dumpNote: '', editTask: null, calSettings: false, editActivity: null, weekOffset: 0 };
+const ui = { editRoutine: null, view: 'today', dumpNote: '', editTask: null, calSettings: false, editActivity: null, weekOffset: 0, shuffle: {} };
 
 function page(view) {
   ui.view = view;
@@ -284,6 +284,7 @@ function suggestionsForToday(info, nowMin) {
     .filter(t => !t.done && !plannedTasks.has(String(t.id)) && !(heavy && isWorkSpace(byId(data.spaces, t.spaceId)) && prioOf(t) !== 'Alta'))
     .sort((a, b) => score(a) - score(b) || (a.date || '9999').localeCompare(b.date || '9999') || minOf(b) - minOf(a));
   const usedTasks = new Set(), usedActs = new Set(plannedActs);
+  const planUsed = { tasks: new Set(), acts: new Set(plannedActs) };
   const out = [];
   for (const f of info.slots.filter(x => x.kind === 'free')) {
     const start = Math.ceil(Math.max(f.s, nowMin) / 5) * 5;
@@ -307,9 +308,25 @@ function suggestionsForToday(info, nowMin) {
         text: `${esc(a.name)} <small>(${a.minutes} min · ${esc(a.stack)}${g && wk < g ? ` · ${wk}/${g} esta semana` : ''})</small>` });
     }
     options.push({ icon: '☾', kind: 'rest', ref: '', min: Math.min(30, len), text: len >= 90 ? 'Descansar un rato, un paseo o no hacer nada' : 'Descansar un rato' });
-    out.push({ s: start, e: f.e, len, options });
+    out.push({ s: start, e: f.e, len, options, plan: planForGap(start, f.e, pending, evening, planUsed) });
   }
   return out;
+}
+/* Plan completo para un hueco: una tarea (si hay), una mezcla de hobbies de distintas categorías y un descanso */
+function planForGap(start, end, pending, evening, used) {
+  const len = end - start, n = ui.shuffle[start] || 0, seed = today() + '|' + start + '|' + n;
+  const items = []; let left = len;
+  const cands = pending.filter(t => !used.tasks.has(t.id) && (!minOf(t) || minOf(t) <= len));
+  if (cands.length) {
+    const t = cands[n % cands.length], m = Math.min(minOf(t) || 45, len);
+    used.tasks.add(t.id); items.push({ kind: 'task', ref: t.id, min: m, text: t.name, icon: '☷' }); left -= m;
+  }
+  const fit = data.activities.filter(a => !used.acts.has(a.id) && (!evening || a.energy === 'Baja'));
+  const mix = pickMix(fit, Math.max(0, left - (left >= 60 ? 15 : 0)), seed);
+  for (const a of mix.slice(0, 3)) { used.acts.add(a.id); items.push({ kind: 'hobby', ref: a.id, min: a.minutes, text: a.name, icon: '✧', cat: a.stack }); left -= a.minutes; }
+  if (left >= 15 && items.length) { const m = Math.min(20, left); items.push({ kind: 'rest', ref: '', min: m, text: 'Descansar un rato', icon: '☾' }); left -= m; }
+  let t = start; items.forEach(i => { i.s = t; t += i.min; });
+  return items;
 }
 function planRow(p) {
   const icon = p.kind === 'task' ? '☷' : p.kind === 'hobby' ? '✧' : '☾';
@@ -372,8 +389,10 @@ function renderHome() {
       <p class="eyebrow">SUGERENCIAS</p><h2>Para tus huecos de hoy</h2>
       ${heavy ? `<p class="note">Hoy ya llevas ${dur(work)} de trabajo, así que no te propongo tareas de trabajo, salvo las de prioridad alta.</p>` : ''}
       ${suggestionsForToday(info, nowMin).map(g => `
-        <div class="sugg"><div class="sugg-head"><b>${fmtMin(g.s)}–${fmtMin(g.e)}</b><span>Tienes un hueco libre de ${dur(g.len)}. Toca lo que te apetezca y se añade a tu día:</span></div>
-          <ul>${g.options.map(o => `<li><button type="button" class="sugg-opt" data-act="plan-add" data-kind="${o.kind}" data-ref="${esc(o.ref)}" data-start="${g.s}" data-min="${o.min}"><i>${o.icon}</i><span>${o.text}</span><em>＋</em></button></li>`).join('')}</ul></div>`).join('')
+        <div class="sugg"><div class="sugg-head"><b>${fmtMin(g.s)}–${fmtMin(g.e)}</b><span>Tienes un hueco libre de ${dur(g.len)}. Te propongo este plan:</span></div>
+          ${g.plan.length ? `<ul class="plan-list">${g.plan.map(i => `<li><i>${i.icon}</i> <b>${esc(i.text)}</b> <small>${fmtMin(i.s)} · ${i.min} min${i.cat ? ' · ' + esc(i.cat) : ''}</small></li>`).join('')}</ul>
+          <div class="form-actions"><button type="button" class="primary small" data-act="plan-add-all" data-start="${g.s}" data-items="${esc(JSON.stringify(g.plan.map(i => ({ kind: i.kind, ref: i.ref, min: i.min }))))}">＋ Añadir este plan a mi día</button><button type="button" class="text-button" data-act="sugg-shuffle" data-id="${g.s}">↻ Otra combinación</button></div>` : ''}
+          <details class="sugg-more"><summary>Prefiero elegir cosas sueltas</summary><ul>${g.options.map(o => `<li><button type="button" class="sugg-opt" data-act="plan-add" data-kind="${o.kind}" data-ref="${esc(o.ref)}" data-start="${g.s}" data-min="${o.min}"><i>${o.icon}</i><span>${o.text}</span><em>＋</em></button></li>`).join('')}</ul></details></div>`).join('')
         || '<div class="empty">Hoy no te quedan huecos libres. Disfruta lo que tienes en la agenda.</div>'}
     </section>
     <section class="panel suggestion">
@@ -612,16 +631,20 @@ function trackerHtml() {
     const n = weekCount(a.id), g = goalOf(a);
     return `<div class="trk-row"><div class="trk-top"><b>${esc(a.name)}</b><small>${n}${g ? ' de ' + g : ''} ${n === 1 && !g ? 'vez' : 'veces'} esta semana · última: ${ago(lastDone(a.id))}</small></div>${g ? `<div class="bar" role="progressbar" aria-valuenow="${n}" aria-valuemin="0" aria-valuemax="${g}"><i style="width:${Math.min(100, Math.round(n / g * 100))}%"></i></div>` : ''}</div>`;
   }).join('');
-  const recent = [...data.log].sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 5).map(l => {
+  const recent = [...data.log].sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8).map(l => {
     const a = byId(data.activities, l.activityId);
-    return `<div class="item"><span>✓ ${esc(a ? a.name : 'Hobby eliminado')}</span><small>${fmtDate(l.date)}${+l.minutes ? ' · ' + l.minutes + ' min' : ''}</small><button class="icon-btn" data-act="del-log" data-id="${esc(l.id)}" aria-label="Borrar sesión">×</button></div>`;
+    return `<div class="item"><span>✓ ${esc(a ? a.name : 'Hobby eliminado')}</span><small>${+l.minutes ? l.minutes + ' min · ' : ''}<input type="date" class="date-edit" data-logdate="${esc(l.id)}" value="${esc(l.date)}" max="${today()}" aria-label="Fecha en la que lo hiciste"></small><button class="icon-btn" data-act="del-log" data-id="${esc(l.id)}" aria-label="Borrar sesión">×</button></div>`;
   }).join('');
   return `<section class="panel tracker">
     <p class="eyebrow">TRACKER</p><h2>Mi semana de hobbies</h2>
     <div class="week-strip" aria-label="Días de esta semana con algún hobby">${strip}</div>
     <p class="muted">${wl.length ? `${wl.length} ${wl.length === 1 ? 'sesión' : 'sesiones'} · ${dur(mins)} · ${distinct} ${distinct === 1 ? 'hobby' : 'hobbies'}` : 'Todavía no has registrado nada esta semana.'}${st >= 2 ? ` · racha de ${st} días seguidos` : ''}</p>
     ${rows || '<p class="empty small">Pulsa «✓ Hecho hoy» en un hobby cuando lo hagas, o ponle un objetivo semanal, y aquí verás tu progreso.</p>'}
-    ${recent ? `<p class="eyebrow sub">ÚLTIMAS SESIONES</p>${recent}` : ''}
+    ${data.activities.length ? `<p class="eyebrow sub">¿SE TE OLVIDÓ APUNTAR ALGO?</p>
+    <form id="log-form" class="log-form"><select name="hobby" aria-label="Hobby">${data.activities.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select>
+      <input type="date" name="date" value="${ymd(new Date(Date.now() - 864e5))}" max="${today()}" aria-label="Día en que lo hiciste" required>
+      <button class="primary small">Registrar</button></form>` : ''}
+    ${recent ? `<p class="eyebrow sub">ÚLTIMAS SESIONES <small>(toca la fecha para cambiarla)</small></p>${recent}` : ''}
   </section>`;
 }
 
@@ -794,6 +817,20 @@ const actions = {
     data.log.push({ id: uid(), date: today(), activityId: a.id, minutes: +a.minutes || 0 });
     save(); render();
   },
+  'plan-add-all': (id, b) => {
+    let items; try { items = JSON.parse(b.dataset.items); } catch { return; }
+    let st = +b.dataset.start;
+    for (const i of items) {
+      const m = Math.max(5, Math.min(+i.min || 30, 1439 - st));
+      let text = 'Descansar un rato';
+      if (i.kind === 'task') { const t = byId(data.tasks, i.ref); if (!t) continue; text = t.name; }
+      else if (i.kind === 'hobby') { const a = byId(data.activities, i.ref); if (!a) continue; text = a.name; }
+      data.plan.push({ id: uid(), date: today(), start: fmtMin(st), end: fmtMin(st + m), kind: i.kind, refId: i.ref || '', text, done: false });
+      st += m;
+    }
+    save(); render();
+  },
+  'sugg-shuffle': id => { ui.shuffle[id] = (ui.shuffle[id] || 0) + 1; render(); },
   'del-log': id => { data.log = data.log.filter(l => !same(l.id, id)); save(); render(); },
   'plan-add': (id, b) => {
     const d = b.dataset, st = +d.start, m = Math.max(5, Math.min(+d.min || 30, 1439 - st));
@@ -840,6 +877,13 @@ const forms = {
     const name = f.name.value.trim(); if (!name) return;
     const sp = { id: uid(), name, color: COLORS[data.spaces.length % COLORS.length], work: !!(f.work && f.work.checked) || WORK_RE.test(name) };
     data.spaces.push(sp); save(); render();
+  },
+  'log-form': f => {
+    const a = byId(data.activities, f.hobby.value), date = f.date.value;
+    if (!a || !date) return;
+    if (date > today()) { alert('Esa fecha todavía no ha llegado.'); return; }
+    data.log.push({ id: uid(), date, activityId: a.id, minutes: +a.minutes || 0 });
+    save(); render();
   },
   'activity-form': f => {
     const item = { name: f.name.value.trim(), stack: f.stack.value.trim(), minutes: +f.minutes.value || 20, energy: f.energy.value, tags: f.tags.value.trim(), goal: Math.max(0, Math.min(14, Math.round(+f.goal.value || 0))) };
@@ -895,6 +939,10 @@ app.addEventListener('change', async e => {
       }
       save(); render();
     }
+  } else if (t.dataset.logdate !== undefined) {
+    const l = byId(data.log, t.dataset.logdate);
+    if (l && t.value && t.value <= today()) { l.date = t.value; save(); }
+    render();
   } else if (t.closest && t.closest('#theme-form')) {
     data.settings.season = t.form.season.value; data.settings.phase = t.form.phase.value;
     save(); applyTheme(); render();
