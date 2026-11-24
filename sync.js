@@ -3,7 +3,7 @@
 const SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
 const UID_KEY = 'lifeos-sync-uid';
 const BACKUP_KEY = 'lifeos-backup-before-sync';
-const LISTS = ['tasks', 'activities', 'events', 'spaces', 'routines', 'dump'];
+const LISTS = ['tasks', 'activities', 'events', 'spaces', 'routines', 'dump', 'plan', 'log'];
 
 const state = { configured: false, ready: false, loading: true, user: null, status: 'idle', lastSync: 0, error: '', info: '', conflict: false };
 const emit = () => window.dispatchEvent(new Event('lifesync'));

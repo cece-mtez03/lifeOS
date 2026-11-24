@@ -15,7 +15,9 @@ const initial = {
   spaces: [],
   routines: [],
   events: [],
-  settings: { dayStart: '08:00', dayEnd: '22:00', season: 'auto', phase: 'auto' },
+  plan: [],
+  log: [],
+  settings: { dayStart: '08:00', dayEnd: '22:00', season: 'auto', phase: 'auto', workLimit: 6 },
   activities: [
     { id: 1, name: 'Murdoku', stack: 'Sofá', minutes: 20, energy: 'Baja', tags: 'sin preparar, sofá' },
     { id: 2, name: 'Leer un capítulo', stack: 'Desconexión', minutes: 30, energy: 'Baja', tags: 'sofá, tranquilo' },
@@ -27,8 +29,8 @@ const initial = {
 /* ---------- Datos ---------- */
 function normalize(raw) {
   const d = Object.assign(structuredClone(initial), raw && typeof raw === 'object' ? raw : {});
-  ['tasks', 'activities', 'events', 'spaces', 'routines', 'dump'].forEach(k => { if (!Array.isArray(d[k])) d[k] = []; });
-  d.settings = Object.assign({ dayStart: '08:00', dayEnd: '22:00', season: 'auto', phase: 'auto' }, d.settings);
+  ['tasks', 'activities', 'events', 'spaces', 'routines', 'dump', 'plan', 'log'].forEach(k => { if (!Array.isArray(d[k])) d[k] = []; });
+  d.settings = Object.assign({ dayStart: '08:00', dayEnd: '22:00', season: 'auto', phase: 'auto', workLimit: 6 }, d.settings);
   return d;
 }
 let data;
@@ -67,6 +69,57 @@ const today = () => ymd(new Date());
 const fmtDate = s => s ? parseYmd(s).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '';
 function mondayOf(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+/* ---------- Trabajo, tracker y variedad ---------- */
+const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const WORK_RE = /trabaj|work|curro|oficina|empresa/i;
+const isWorkSpace = sp => !!sp && (sp.work !== undefined ? !!sp.work : WORK_RE.test(sp.name || ''));
+const isWorkRoutine = r => r.work !== undefined ? !!r.work : WORK_RE.test(r.name || '');
+function workMinutes(ds) {
+  const dow = parseYmd(ds).getDay();
+  return data.routines.filter(r => r.days.includes(dow) && isWorkRoutine(r)).reduce((t, r) => t + Math.max(0, toMin(r.end) - toMin(r.start)), 0);
+}
+const workLimitMin = () => Math.max(1, +data.settings.workLimit || 6) * 60;
+const goalOf = a => Math.max(0, Math.min(14, Math.round(+a.goal || 0)));
+const weekStartYmd = () => ymd(mondayOf(new Date()));
+const daysBetween = ds => Math.round((parseYmd(today()) - parseYmd(ds)) / 864e5);
+const ago = ds => { if (!ds) return 'aún no'; const n = daysBetween(ds); return n <= 0 ? 'hoy' : n === 1 ? 'ayer' : `hace ${n} días`; };
+const logsOf = id => data.log.filter(l => same(l.activityId, id));
+const lastDone = id => logsOf(id).reduce((m, l) => l.date > m ? l.date : m, '');
+const weekCount = id => logsOf(id).filter(l => l.date >= weekStartYmd()).length;
+function neglect(a) { // cuanto mayor, más ganas de proponerlo: hace tiempo que no lo haces o va por debajo de su objetivo
+  const last = lastDone(a.id), since = last ? Math.min(daysBetween(last), 30) : 30;
+  const g = goalOf(a), wk = weekCount(a.id);
+  return since + (g ? (wk < g ? 10 + (g - wk) * 3 : -15) : 0);
+}
+function seeded(str) { let h = 0; for (const c of String(str)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return (h % 1000) / 1000; }
+function rankActs(list, seed) { // seed fijo: orden estable durante el día; sin seed: distinto cada vez
+  return list.map(a => ({ a, v: neglect(a) + (seed ? seeded(seed + a.id) : Math.random()) * 4 })).sort((x, y) => y.v - x.v).map(x => x.a);
+}
+function pickAlternatives(list, seed, n = 2) { // n opciones, de categorías distintas si es posible
+  const r = rankActs(list, seed), out = [];
+  for (const a of r) if (out.length < n && !out.some(o => o.stack === a.stack)) out.push(a);
+  for (const a of r) if (out.length < n && !out.includes(a)) out.push(a);
+  return out;
+}
+function pickMix(list, budget) { // combinación que cabe en el tiempo: primero 1 por categoría, luego hasta 2
+  const ranked = rankActs(list), chosen = [];
+  let left = budget;
+  for (const pass of [1, 2]) {
+    for (const a of ranked) {
+      if (chosen.includes(a) || a.minutes > left) continue;
+      if (chosen.filter(c => c.stack === a.stack).length >= pass) continue;
+      chosen.push(a); left -= a.minutes;
+      if (left < 10) return chosen;
+    }
+  }
+  return chosen;
+}
+function streak() {
+  const days = new Set(data.log.map(l => l.date));
+  const d = new Date(); if (!days.has(ymd(d))) d.setDate(d.getDate() - 1);
+  let n = 0; while (days.has(ymd(d)) && n < 3650) { n++; d.setDate(d.getDate() - 1); }
+  return n;
+}
 const opts = (list, sel) => list.map(o => `<option${o === sel ? ' selected' : ''}>${esc(o)}</option>`).join('');
 
 /* ---------- Tema: estación y momento del día ---------- */
@@ -134,7 +187,7 @@ function applyTheme() {
 }
 
 /* ---------- Estado de interfaz ---------- */
-const ui = { view: 'today', dumpNote: '', editTask: null, calSettings: false, editActivity: null, weekOffset: 0 };
+const ui = { editRoutine: null, view: 'today', dumpNote: '', editTask: null, calSettings: false, editActivity: null, weekOffset: 0 };
 
 function page(view) {
   ui.view = view;
@@ -161,6 +214,9 @@ function dayInfo(ds) {
     const e = ev.end && toMin(ev.end) > s ? toMin(ev.end) : Math.min(s + 60, 1439);
     blocks.push({ s, e, name: ev.name, kind: 'event', id: ev.id });
   });
+  data.plan.forEach(p => {
+    if (p.date === ds) blocks.push({ s: toMin(p.start), e: toMin(p.end), name: p.text, kind: 'plan', id: p.id, done: !!p.done });
+  });
   blocks.sort((a, b) => a.s - b.s);
   const ws = toMin(data.settings.dayStart), we = toMin(data.settings.dayEnd);
   const free = [];
@@ -177,8 +233,9 @@ function dayInfo(ds) {
 function slotHtml(x) {
   const label = `<b>${fmtMin(x.s)}–${fmtMin(x.e)}</b>`;
   if (x.kind === 'free') return `<div class="slot free">${label}<span>Libre · ${dur(x.e - x.s)}</span></div>`;
-  const del = x.kind === 'event' ? `<button class="icon-btn" data-act="del-event" data-id="${esc(x.id)}" aria-label="Eliminar plan">×</button>` : '';
-  return `<div class="slot ${x.kind}">${label}<span>${esc(x.name)}</span>${del}</div>`;
+  const del = x.kind === 'event' ? `<button class="icon-btn" data-act="del-event" data-id="${esc(x.id)}" aria-label="Eliminar plan">×</button>`
+    : x.kind === 'plan' ? `<button class="icon-btn" data-act="del-plan" data-id="${esc(x.id)}" aria-label="Quitar de mi día">×</button>` : '';
+  return `<div class="slot ${x.kind}${x.done ? ' done-slot' : ''}">${label}<span>${esc(x.name)}</span>${del}</div>`;
 }
 
 /* ---------- Mi día ---------- */
@@ -215,17 +272,21 @@ function taskRow(t, showSpace = true) {
 }
 /* Sugerencias para los huecos libres de hoy */
 function suggestionsForToday(info, nowMin) {
-  const usedTasks = new Set(), usedActs = new Set();
   const ts = today();
   const d3 = new Date(); d3.setDate(d3.getDate() + 3);
   const soon = ymd(d3);
   const urgency = t => !t.date ? 2 : t.date <= ts ? 0 : t.date <= soon ? 1 : 2;
   const score = t => PRIO_RANK[prioOf(t)] + urgency(t);
-  const pending = data.tasks.filter(t => !t.done)
+  const heavy = workMinutes(ts) >= workLimitMin(); // día de mucho trabajo: solo tareas de trabajo prioritarias
+  const planned = kind => new Set(data.plan.filter(p => p.date === ts && p.kind === kind).map(p => String(p.refId)));
+  const plannedTasks = planned('task'), plannedActs = planned('hobby');
+  const pending = data.tasks
+    .filter(t => !t.done && !plannedTasks.has(String(t.id)) && !(heavy && isWorkSpace(byId(data.spaces, t.spaceId)) && prioOf(t) !== 'Alta'))
     .sort((a, b) => score(a) - score(b) || (a.date || '9999').localeCompare(b.date || '9999') || minOf(b) - minOf(a));
+  const usedTasks = new Set(), usedActs = new Set(plannedActs);
   const out = [];
   for (const f of info.slots.filter(x => x.kind === 'free')) {
-    const start = Math.max(f.s, nowMin);
+    const start = Math.ceil(Math.max(f.s, nowMin) / 5) * 5;
     const len = f.e - start;
     if (len < MIN_GAP) continue;
     const options = [];
@@ -234,20 +295,27 @@ function suggestionsForToday(info, nowMin) {
       usedTasks.add(task.id);
       const sp = byId(data.spaces, task.spaceId);
       const late = task.date && task.date < ts ? ' (atrasada)' : task.date === ts ? ' (para hoy)' : '';
-      options.push({ icon: '☷', text: `Avanzar con «${esc(task.name)}»${sp ? ' · ' + esc(sp.name) : ''}${minOf(task) ? ' · ⏱ ' + dur(minOf(task)) : ''}${prioOf(task) === 'Alta' ? ' · prioridad alta' : ''}${late}` });
+      options.push({ icon: '☷', kind: 'task', ref: task.id, min: Math.min(minOf(task) || 45, len),
+        text: `Avanzar con «${esc(task.name)}»${sp ? ' · ' + esc(sp.name) : ''}${minOf(task) ? ' · ⏱ ' + dur(minOf(task)) : ''}${prioOf(task) === 'Alta' ? ' · prioridad alta' : ''}${late}` });
     }
     const evening = start >= 20 * 60;
-    const acts = data.activities
-      .filter(a => a.minutes <= len && !usedActs.has(a.id) && (!evening || a.energy === 'Baja'))
-      .sort((a, b) => b.minutes - a.minutes);
-    if (acts.length) {
-      usedActs.add(acts[0].id);
-      options.push({ icon: '✧', text: `${esc(acts[0].name)} <small>(${acts[0].minutes} min · ${esc(acts[0].stack)})</small>` });
+    const fit = data.activities.filter(a => a.minutes <= len && !usedActs.has(a.id) && (!evening || a.energy === 'Baja'));
+    for (const a of pickAlternatives(fit, ts + '|' + f.s, 2)) {
+      usedActs.add(a.id);
+      const g = goalOf(a), wk = weekCount(a.id);
+      options.push({ icon: '✧', kind: 'hobby', ref: a.id, min: a.minutes,
+        text: `${esc(a.name)} <small>(${a.minutes} min · ${esc(a.stack)}${g && wk < g ? ` · ${wk}/${g} esta semana` : ''})</small>` });
     }
-    options.push({ icon: '☾', text: len >= 90 ? 'Descansar un rato, un paseo o no hacer nada' : 'Descansar un rato' });
+    options.push({ icon: '☾', kind: 'rest', ref: '', min: Math.min(30, len), text: len >= 90 ? 'Descansar un rato, un paseo o no hacer nada' : 'Descansar un rato' });
     out.push({ s: start, e: f.e, len, options });
   }
   return out;
+}
+function planRow(p) {
+  const icon = p.kind === 'task' ? '☷' : p.kind === 'hobby' ? '✧' : '☾';
+  return `<div class="item task-item"><input type="checkbox" data-plan="${esc(p.id)}" ${p.done ? 'checked' : ''} aria-label="Hecho">
+    <div class="task-main"><span class="${p.done ? 'done' : ''}">${icon} ${esc(p.text)}</span><div class="meta"><span class="meta-t">${esc(p.start)}–${esc(p.end)}</span></div></div>
+    <button class="icon-btn" data-act="del-plan" data-id="${esc(p.id)}" aria-label="Quitar de mi día">×</button></div>`;
 }
 const HIDE_SIGNIN_KEY = 'planetme-hide-signin';
 function showSignin() {
@@ -269,11 +337,13 @@ function renderTopAccount() {
   el.innerHTML = (S.user.photo ? `<img src="${esc(S.user.photo)}" alt="" referrerpolicy="no-referrer">` : `<i>${esc((name[0] || '?').toUpperCase())}</i>`) + `<span>${esc(name)}</span>`;
 }
 function renderHome() {
-  const d = new Date(), h = d.getHours(), ts = today();
+  const d = new Date(), ts = today(), nowMin = d.getHours() * 60 + d.getMinutes();
   const greeting = { manana: 'Buenos días.', tarde: 'Buenas tardes.', noche: 'Buenas noches.' }[themeNow().phase];
   const todays = data.tasks.filter(t => t.date === ts);
   const info = dayInfo(ts);
-  const slots = info.slots.filter(x => x.kind !== 'free' || x.e > d.getHours() * 60 + d.getMinutes());
+  const slots = info.slots.filter(x => x.kind !== 'free' || x.e > nowMin);
+  const plans = data.plan.filter(p => p.date === ts).sort((a, b) => a.start.localeCompare(b.start));
+  const work = workMinutes(ts), heavy = work >= workLimitMin();
   $('#app').innerHTML = `
     <section class="welcome"><div><p class="eyebrow">${esc(d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase())}</p><h1>${greeting}</h1><p class="muted">${esc(themeLine())}</p></div><div class="sun" aria-hidden="true">${themeGlyph()}</div></section>
     <section class="stats">
@@ -294,11 +364,16 @@ function renderHome() {
       ${info.allDay.map(ev => `<div class="slot allday"><b>Todo el día</b><span>${esc(ev.name)}</span></div>`).join('')}
       ${slots.length ? `<div class="slots">${slots.map(slotHtml).join('')}</div>` : '<div class="empty">Nada en la agenda de hoy.</div>'}
     </section>
+    <section class="panel life-panel">
+      <p class="eyebrow">TU RATO PARA TI</p><h2>Mi vida más allá del trabajo</h2>
+      ${plans.length ? plans.map(planRow).join('') : '<p class="empty">Toca una de las sugerencias de abajo y se añade a tu día.</p>'}
+    </section>
     <section class="panel">
       <p class="eyebrow">SUGERENCIAS</p><h2>Para tus huecos de hoy</h2>
-      ${suggestionsForToday(info, d.getHours() * 60 + d.getMinutes()).map(g => `
-        <div class="sugg"><div class="sugg-head"><b>${fmtMin(g.s)}–${fmtMin(g.e)}</b><span>Tienes un hueco libre de ${dur(g.len)}. Podrías:</span></div>
-          <ul>${g.options.map((o, i) => `<li><i>${o.icon}</i><span>${i ? 'o ' : ''}${o.text}</span></li>`).join('')}</ul></div>`).join('')
+      ${heavy ? `<p class="note">Hoy ya llevas ${dur(work)} de trabajo, así que no te propongo tareas de trabajo, salvo las de prioridad alta.</p>` : ''}
+      ${suggestionsForToday(info, nowMin).map(g => `
+        <div class="sugg"><div class="sugg-head"><b>${fmtMin(g.s)}–${fmtMin(g.e)}</b><span>Tienes un hueco libre de ${dur(g.len)}. Toca lo que te apetezca y se añade a tu día:</span></div>
+          <ul>${g.options.map(o => `<li><button type="button" class="sugg-opt" data-act="plan-add" data-kind="${o.kind}" data-ref="${esc(o.ref)}" data-start="${g.s}" data-min="${o.min}"><i>${o.icon}</i><span>${o.text}</span><em>＋</em></button></li>`).join('')}</ul></div>`).join('')
         || '<div class="empty">Hoy no te quedan huecos libres. Disfruta lo que tienes en la agenda.</div>'}
     </section>
     <section class="panel suggestion">
@@ -329,7 +404,7 @@ function spaceCard(sp) {
         <button class="primary" aria-label="Añadir tarea">+</button>
       </div>
     </form>
-    ${sp ? `<div class="card-actions"><button class="text-button" data-act="rename-space" data-id="${esc(sp.id)}">Renombrar</button><button class="text-button danger" data-act="del-space" data-id="${esc(sp.id)}">Eliminar</button></div>` : ''}
+    ${sp ? `<div class="card-actions"><button class="text-button" data-act="toggle-work" data-id="${esc(sp.id)}">${isWorkSpace(sp) ? 'Espacio de trabajo ✓' : 'Marcar como trabajo'}</button><button class="text-button" data-act="rename-space" data-id="${esc(sp.id)}">Renombrar</button><button class="text-button danger" data-act="del-space" data-id="${esc(sp.id)}">Eliminar</button></div>` : ''}
   </article>`;
 }
 function renderTasks() {
@@ -337,7 +412,8 @@ function renderTasks() {
   $('#app').innerHTML = head('Mis tareas', 'Saca las ideas de tu cabeza y dales un lugar.') + `
     <section class="panel">
       <h2>Crea un espacio</h2>
-      <form id="space-form" class="form-row"><input class="field" name="name" placeholder="Ej. Trabajo, Máster, Boda…" required maxlength="40"><button class="primary">Guardar</button></form>
+      <form id="space-form" class="form-row"><input class="field" name="name" placeholder="Ej. Trabajo, Máster, Boda…" required maxlength="40"><button class="primary">Guardar</button>
+        <label class="check span-all"><input type="checkbox" name="work"> Es un espacio de trabajo (si ya has trabajado mucho ese día, no te sugeriré sus tareas, salvo las prioritarias)</label></form>
     </section>
     <div class="section-head"><div><p class="eyebrow">TUS ESPACIOS</p><h2>Mis tareas</h2></div></div>
     <div class="stack-grid">${data.spaces.map(spaceCard).join('')}${loose || !data.spaces.length ? spaceCard(null) : ''}</div>`;
@@ -358,6 +434,8 @@ function renderCalendar() {
   const range = `${days[0].toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} – ${days[6].toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}`;
   const upcoming = data.events.filter(e => e.date >= ts).sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || ''))).slice(0, 12);
   const importedCount = data.events.filter(e => e.src === 'ics').length;
+  const er = byId(data.routines, ui.editRoutine);
+  const rv = er || { name: '', start: '09:00', end: '17:00', days: [1, 2, 3, 4, 5], work: true };
   $('#app').innerHTML = head('Mi calendario', 'Tu semana de un vistazo, con los huecos que te quedan libres.') + `
     <section class="panel">
       <div class="section-head"><div><p class="eyebrow">SEMANA</p><h2>${esc(range)}</h2></div>
@@ -374,27 +452,38 @@ function renderCalendar() {
     </section>
 
     ${ui.calSettings ? `
-    <section class="panel">
+    <section class="panel" id="routine-form-wrap">
       <p class="eyebrow">HORARIO FIJO</p><h2>Trabajo, clases y rutinas</h2>
-      <p class="muted">Lo que se repite cada semana. Se bloquea solo en los días que elijas.</p>
-      ${data.routines.map(r => `<div class="item"><span><b>${esc(r.name)}</b></span><small>${WEEK_ORDER.filter(d => r.days.includes(d)).map(d => DAY_SHORT[d]).join(' ')} · ${esc(r.start)}–${esc(r.end)}</small><button class="icon-btn" data-act="del-routine" data-id="${esc(r.id)}" aria-label="Eliminar horario">×</button></div>`).join('') || '<p class="empty">Aún no has añadido ningún horario fijo.</p>'}
-      <form id="routine-form" class="form-row">
-        <input class="field" name="name" placeholder="Ej. Trabajo" required>
-        <input class="field" name="start" type="time" value="09:00" required aria-label="Desde">
-        <input class="field" name="end" type="time" value="17:00" required aria-label="Hasta">
-        <div class="days">${WEEK_ORDER.map(d => `<label><input type="checkbox" name="day" value="${d}"${d >= 1 && d <= 5 ? ' checked' : ''}><span>${DAY_SHORT[d]}</span></label>`).join('')}</div>
-        <button class="primary">Añadir horario</button>
+      <p class="muted">Lo que se repite cada semana. Se bloquea solo en los días que elijas. Pulsa ✎ para cambiar uno.</p>
+      ${data.routines.map(r => `<div class="item${er && same(er.id, r.id) ? ' editing-row' : ''}"><span><b>${esc(r.name)}</b>${isWorkRoutine(r) ? ' <span class="tiny">· trabajo</span>' : ''}</span><small>${WEEK_ORDER.filter(d => r.days.includes(d)).map(d => DAY_SHORT[d]).join(' ')} · ${esc(r.start)}–${esc(r.end)}</small><button class="icon-btn" data-act="edit-routine" data-id="${esc(r.id)}" aria-label="Editar horario">✎</button><button class="icon-btn" data-act="del-routine" data-id="${esc(r.id)}" aria-label="Eliminar horario">×</button></div>`).join('') || '<p class="empty">Aún no has añadido ningún horario fijo.</p>'}
+      <h3 class="sub-title">${er ? 'Editar «' + esc(er.name) + '»' : 'Añadir un horario fijo'}</h3>
+      <form id="routine-form" class="form-grid">
+        <label class="fld span2"><span>Nombre</span><input class="field" name="name" placeholder="Ej. Trabajo" value="${esc(rv.name)}" required></label>
+        <label class="fld"><span>Desde</span><input class="field" name="start" type="time" value="${esc(rv.start)}" required></label>
+        <label class="fld"><span>Hasta</span><input class="field" name="end" type="time" value="${esc(rv.end)}" required></label>
+        <div class="fld span2"><span>Días</span><div class="days">${WEEK_ORDER.map(d => `<label><input type="checkbox" name="day" value="${d}"${rv.days.includes(d) ? ' checked' : ''}><span>${DAY_SHORT[d]}</span></label>`).join('')}</div></div>
+        <label class="check span2"><input type="checkbox" name="work"${isWorkRoutine(rv) ? ' checked' : ''}> Cuenta como trabajo (los días largos no te sugeriré más tareas de trabajo, salvo las prioritarias)</label>
+        <div class="form-actions span2"><button class="primary">${er ? 'Guardar cambios' : 'Añadir horario'}</button>${er ? '<button type="button" class="text-button" data-act="cancel-routine-edit">Cancelar</button>' : ''}</div>
       </form>
     </section>
 
     <section class="panel">
       <p class="eyebrow">AJUSTES</p><h2>Tu jornada</h2>
       <p class="muted">Los huecos libres se calculan dentro de este margen horario.</p>
-      <form id="settings-form" class="form-row">
-        <label class="inline">Empiezo a las <input class="field" name="dayStart" type="time" value="${esc(data.settings.dayStart)}" required></label>
-        <label class="inline">Termino a las <input class="field" name="dayEnd" type="time" value="${esc(data.settings.dayEnd)}" required></label>
-        <button class="primary">Guardar</button>
+      <form id="settings-form" class="form-grid">
+        <label class="fld"><span>Empiezo a las</span><input class="field" name="dayStart" type="time" value="${esc(data.settings.dayStart)}" required></label>
+        <label class="fld"><span>Termino a las</span><input class="field" name="dayEnd" type="time" value="${esc(data.settings.dayEnd)}" required></label>
+        <label class="fld span2"><span>Si trabajo más de (horas), no me sugieras tareas de trabajo, salvo las prioritarias</span><input class="field" name="workLimit" type="number" min="1" max="16" step="0.5" value="${esc(data.settings.workLimit || 6)}"></label>
+        <div class="form-actions span2"><button class="primary">Guardar</button></div>
       </form>
+    </section>
+
+    <section class="panel">
+      <p class="eyebrow">GOOGLE CALENDAR</p><h2>Traer tu calendario de Google</h2>
+      <p class="muted">En <b>calendar.google.com → Configuración → Importar y exportar → Exportar</b> se descarga un .zip. Descomprímelo y sube aquí el archivo .ics de tu calendario. Se importan los eventos de los últimos 60 días en adelante; los que se repiten solo entran con su primera fecha. Cada plan tiene además un botón «+ Google» para enviarlo a tu Google Calendar.</p>
+      <label class="primary file-btn">Importar archivo .ics<input type="file" id="import-ics" accept=".ics,text/calendar" hidden></label>
+      ${importedCount ? `<button class="text-button danger" data-act="clear-ics">Quitar los ${importedCount} eventos importados</button>` : ''}
+      <p class="tiny">Una sincronización automática y continua con Google necesita un servidor y la autorización de tu cuenta; esta versión funciona solo en tu dispositivo.</p>
     </section>
     ` : ''}
     <section class="panel">
@@ -409,14 +498,6 @@ function renderCalendar() {
       <div class="calendar-list">${upcoming.map(e => `<div class="calendar-event"><b>${fmtDate(e.date)} · ${e.allDay ? 'Todo el día' : esc(e.time) + (e.end ? '–' + esc(e.end) : '')}</b>${esc(e.name)}
         <a class="text-button" href="${esc(gcalLink(e))}" target="_blank" rel="noopener">+ Google</a>
         <button class="icon-btn" data-act="del-event" data-id="${esc(e.id)}" aria-label="Eliminar plan">×</button></div>`).join('') || '<p class="empty">No hay planes próximos.</p>'}</div>
-    </section>
-
-    <section class="panel">
-      <p class="eyebrow">GOOGLE CALENDAR</p><h2>Traer tu calendario de Google</h2>
-      <p class="muted">En <b>calendar.google.com → Configuración → Importar y exportar → Exportar</b> se descarga un .zip. Descomprímelo y sube aquí el archivo .ics de tu calendario. Se importan los eventos de los últimos 60 días en adelante; los que se repiten solo entran con su primera fecha. Cada plan tiene además un botón «+ Google» para enviarlo a tu Google Calendar.</p>
-      <label class="primary file-btn">Importar archivo .ics<input type="file" id="import-ics" accept=".ics,text/calendar" hidden></label>
-      ${importedCount ? `<button class="text-button danger" data-act="clear-ics">Quitar los ${importedCount} eventos importados</button>` : ''}
-      <p class="tiny">Una sincronización automática y continua con Google necesita un servidor y la autorización de tu cuenta; esta versión funciona solo en tu dispositivo.</p>
     </section>`;
   const wk = $('.week'), td = $('.day.today');
   if (wk && td && wk.scrollWidth > wk.clientWidth) wk.scrollLeft = Math.max(0, td.offsetLeft - wk.offsetLeft - 4);
@@ -467,44 +548,125 @@ function importICS(text) {
 }
 
 /* ---------- Hobbies ---------- */
+// [palabras clave, minutos, energía, categoría, etiquetas, veces por semana]
+const HOBBY_DB = [
+  [/leer|libro|lectura|capitulo|novela|comic|manga/, 30, 'Baja', 'Desconexión', 'tranquilo, sofá', 4],
+  [/pelicula|\bpeli\b|cine|documental/, 110, 'Baja', 'Sofá', 'sofá, sin preparar', 1],
+  [/serie|netflix|anime/, 45, 'Baja', 'Sofá', 'sofá, sin preparar', 3],
+  [/puzzle|rompecabezas|crucigrama|sudoku|murdoku|pasatiempo|sopa de letras/, 30, 'Baja', 'Sofá', 'sin preparar, sofá', 3],
+  [/videojuego|consola|switch|playstation|ps5|xbox|gaming|partida/, 60, 'Baja', 'Sofá', 'sofá, entretenido', 2],
+  [/juegos? de mesa|parchis|ajedrez|cartas|domino/, 60, 'Media', 'Juegos', 'en compañía', 1],
+  [/colorear|dibujar|dibujo|pintar|pintura|acuarela|lettering|caligrafia|manualidad|collage|scrapbook|bullet/, 40, 'Media', 'Creatividad', 'creativo, sentado', 2],
+  [/tejer|ganchillo|crochet|bordar|coser|costura|macrame|punto de cruz|calceta/, 45, 'Baja', 'Creatividad', 'creativo, manos', 2],
+  [/escribir|diario|journaling|poesia|relato/, 25, 'Baja', 'Creatividad', 'creativo, tranquilo', 3],
+  [/fotografia|fotos|\bfoto\b/, 45, 'Media', 'Creatividad', 'creativo, salir', 1],
+  [/guitarra|piano|ukelele|cantar|violin|bateria|instrumento|musica/, 30, 'Media', 'Música', 'creativo', 3],
+  [/senderismo|excursion|montana|\bruta\b|trekking/, 120, 'Media', 'Naturaleza', 'al aire libre', 1],
+  [/correr|running|trotar|ciclismo|bici|nadar|natacion|gimnasio|\bgym\b|entrenar|pesas|crossfit|padel|tenis|futbol|baloncesto|escalada/, 45, 'Alta', 'Movimiento', 'ejercicio', 3],
+  [/bailar|baile|zumba/, 30, 'Alta', 'Movimiento', 'ejercicio, música', 2],
+  [/yoga|pilates|estiramiento|meditar|meditacion|mindfulness|respiracion/, 20, 'Baja', 'Bienestar', 'relajante', 3],
+  [/pasear|paseo|caminar|\bandar\b/, 30, 'Baja', 'Naturaleza', 'al aire libre, tranquilo', 4],
+  [/jardin|plantas|huerto|regar/, 30, 'Baja', 'Naturaleza', 'al aire libre', 2],
+  [/cocinar|cocina|reposteria|hornear|receta|tarta/, 60, 'Media', 'Cocina', 'en casa', 2],
+  [/idioma|ingles|frances|aleman|italiano|duolingo|curso|aprender|estudiar/, 25, 'Media', 'Aprender', 'mente activa', 4],
+  [/podcast|audiolibro|escuchar/, 30, 'Baja', 'Desconexión', 'tranquilo', 3],
+  [/\bspa\b|masaje|skincare|mascarilla|autocuidado|\bbano\b/, 30, 'Baja', 'Bienestar', 'relajante', 1],
+  [/siesta|descansar/, 20, 'Baja', 'Bienestar', 'relajante', 2],
+  [/amigos|quedar|\bcafe\b|llamar/, 60, 'Media', 'Social', 'en compañía', 1]
+];
+function suggestHobby(name) {
+  const n = norm(name).trim();
+  for (const [re, minutes, energy, stack, tags, goal] of HOBBY_DB) if (re.test(n)) return { known: true, minutes, energy, stack, tags, goal };
+  return { known: false, minutes: 30, energy: 'Media', stack: '', tags: '', goal: 2 };
+}
+function applyHobbyHint(f) {
+  const el = $('#hobby-hint'); if (!el) return;
+  const name = f.name.value.trim();
+  if (name.length < 3) { el.innerHTML = ''; return; }
+  const s = suggestHobby(name);
+  const stacks = [...new Set(data.activities.map(a => a.stack))];
+  const stack = s.stack ? (stacks.find(x => norm(x) === norm(s.stack)) || s.stack) : '';
+  if (!f.dataset.tminutes) f.minutes.value = s.minutes;
+  if (!f.dataset.tenergy) f.energy.value = s.energy;
+  if (stack && !f.dataset.tstack) f.stack.value = stack;
+  if (s.tags && !f.dataset.ttags) f.tags.value = s.tags;
+  if (!f.dataset.tgoal) f.goal.value = s.goal;
+  const d = new Date(), nowM = d.getHours() * 60 + d.getMinutes();
+  const gap = dayInfo(today()).slots.find(x => x.kind === 'free' && x.e - Math.max(x.s, nowM) >= s.minutes);
+  const fit = gap ? ` Hoy te cabe a las ${fmtMin(Math.ceil(Math.max(gap.s, nowM) / 5) * 5)}.` : '';
+  el.innerHTML = `💡 Para «${esc(name)}» te sugiero unos <b>${s.minutes} min</b>, energía ${s.energy.toLowerCase()}${s.goal ? `, ${s.goal} ${s.goal === 1 ? 'vez' : 'veces'} por semana` : ''}.${s.known ? '' : ' No lo conozco aún: es una primera idea, ajústala a tu gusto.'}${fit}`;
+}
+
+function trackerHtml() {
+  const ws = weekStartYmd();
+  const days = Array.from({ length: 7 }, (_, i) => { const x = mondayOf(new Date()); x.setDate(x.getDate() + i); return x; });
+  const wl = data.log.filter(l => l.date >= ws && l.date <= ymd(days[6]));
+  const mins = wl.reduce((t, l) => t + (+l.minutes || 0), 0);
+  const distinct = new Set(wl.map(l => String(l.activityId))).size;
+  const st = streak();
+  const strip = days.map(d => {
+    const ds = ymd(d), n = wl.filter(l => l.date === ds).length;
+    return `<div class="wd${n ? ' on' : ''}${ds === today() ? ' today' : ''}"><span>${DAY_SHORT[d.getDay()]}</span><i>${n || ''}</i></div>`;
+  }).join('');
+  const rows = data.activities.filter(a => goalOf(a) || weekCount(a.id)).map(a => {
+    const n = weekCount(a.id), g = goalOf(a);
+    return `<div class="trk-row"><div class="trk-top"><b>${esc(a.name)}</b><small>${n}${g ? ' de ' + g : ''} ${n === 1 && !g ? 'vez' : 'veces'} esta semana · última: ${ago(lastDone(a.id))}</small></div>${g ? `<div class="bar" role="progressbar" aria-valuenow="${n}" aria-valuemin="0" aria-valuemax="${g}"><i style="width:${Math.min(100, Math.round(n / g * 100))}%"></i></div>` : ''}</div>`;
+  }).join('');
+  const recent = [...data.log].sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 5).map(l => {
+    const a = byId(data.activities, l.activityId);
+    return `<div class="item"><span>✓ ${esc(a ? a.name : 'Hobby eliminado')}</span><small>${fmtDate(l.date)}${+l.minutes ? ' · ' + l.minutes + ' min' : ''}</small><button class="icon-btn" data-act="del-log" data-id="${esc(l.id)}" aria-label="Borrar sesión">×</button></div>`;
+  }).join('');
+  return `<section class="panel tracker">
+    <p class="eyebrow">TRACKER</p><h2>Mi semana de hobbies</h2>
+    <div class="week-strip" aria-label="Días de esta semana con algún hobby">${strip}</div>
+    <p class="muted">${wl.length ? `${wl.length} ${wl.length === 1 ? 'sesión' : 'sesiones'} · ${dur(mins)} · ${distinct} ${distinct === 1 ? 'hobby' : 'hobbies'}` : 'Todavía no has registrado nada esta semana.'}${st >= 2 ? ` · racha de ${st} días seguidos` : ''}</p>
+    ${rows || '<p class="empty small">Pulsa «✓ Hecho hoy» en un hobby cuando lo hagas, o ponle un objetivo semanal, y aquí verás tu progreso.</p>'}
+    ${recent ? `<p class="eyebrow sub">ÚLTIMAS SESIONES</p>${recent}` : ''}
+  </section>`;
+}
+
 function renderBrain() {
   const edit = byId(data.activities, ui.editActivity);
   const stacks = [...new Set(data.activities.map(a => a.stack))];
-  const v = edit || { name: '', stack: '', minutes: 20, energy: 'Baja', tags: '' };
-  $('#app').innerHTML = head('Hobbies', 'Tus hobbies organizados por categorías para que elegir qué hacer sea más fácil.') + `
-    <section class="panel">
-      <h2>${edit ? 'Editar hobby' : 'Añade un hobby'}</h2>
-      <form id="activity-form" class="form-row">
-        <input class="field" name="name" placeholder="Ej. Hacer un puzzle" value="${esc(v.name)}" required>
-        <input class="field" name="stack" list="stack-list" placeholder="Categoría: sofá, creatividad..." value="${esc(v.stack)}" required>
-        <datalist id="stack-list">${stacks.map(s => `<option value="${esc(s)}">`).join('')}</datalist>
-        <input class="field" name="minutes" type="number" min="5" max="300" value="${esc(v.minutes)}" aria-label="Minutos">
-        <select name="energy" aria-label="Energía">${opts(ENERGY, v.energy)}</select>
-        <input class="field" name="tags" placeholder="Etiquetas: sofá, sin preparar" value="${esc(v.tags)}">
-        <button class="primary">${edit ? 'Guardar cambios' : 'Guardar'}</button>
-        ${edit ? '<button type="button" class="text-button" data-act="cancel-edit">Cancelar</button>' : ''}
-      </form>
-    </section>
+  const v = edit || { name: '', stack: '', minutes: 20, energy: 'Baja', tags: '', goal: 0 };
+  $('#app').innerHTML = head('Hobbies', 'Tus hobbies organizados por categorías para que elegir qué hacer sea más fácil.') + trackerHtml() + `
     <div class="section-head"><div><p class="eyebrow">TUS ACTIVIDADES</p><h2>Mis hobbies</h2></div></div>
     ${stacks.map(s => `
       <div class="stack-head"><h3>${esc(s)}</h3><button class="text-button" data-act="rename-stack" data-id="${esc(s)}">Renombrar</button></div>
-      <div class="stack-grid">${data.activities.filter(a => a.stack === s).map(a => `
-        <article class="stack-card${edit && same(edit.id, a.id) ? ' editing' : ''}"><span class="pill">${esc(a.stack)}</span><h3>${esc(a.name)}</h3>
-          <p>${esc(a.minutes)} min · Energía ${esc(a.energy.toLowerCase())}</p><span class="tiny">${esc(a.tags || '')}</span>
-          <div class="card-actions"><button class="text-button" data-act="edit-activity" data-id="${esc(a.id)}">Editar</button><button class="text-button danger" data-act="del-activity" data-id="${esc(a.id)}">Eliminar</button></div>
-        </article>`).join('')}</div>`).join('') || '<p class="empty">Aún no hay hobbies. Añade el primero arriba.</p>'}
-    <section class="plan"><p class="eyebrow">PLAN SUGERIDO</p><h3>¿Qué encaja ahora?</h3><p class="muted">Dinos cuánto tiempo tienes y te proponemos una combinación.</p>
-      <div class="form-row"><select id="free-time" aria-label="Tiempo"><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60" selected>1 hora</option><option value="90">1 hora y media</option></select>
+      <div class="stack-grid">${data.activities.filter(a => a.stack === s).map(a => {
+        const wk = weekCount(a.id), g = goalOf(a), tn = logsOf(a.id).filter(l => l.date === today()).length;
+        return `<article class="stack-card${edit && same(edit.id, a.id) ? ' editing' : ''}"><span class="pill">${esc(a.stack)}</span><h3>${esc(a.name)}</h3>
+          <p>${esc(a.minutes)} min · Energía ${esc(a.energy.toLowerCase())}${g ? ` · objetivo ${g}/semana` : ''}</p><span class="tiny">${esc(a.tags || '')}</span>
+          <p class="trk-line">Esta semana: ${wk}${g ? '/' + g : ''} · última vez: ${ago(lastDone(a.id))}${tn ? ` · hoy ✓${tn > 1 ? ' ×' + tn : ''}` : ''}</p>
+          <div class="card-actions"><button class="primary small" data-act="log-hobby" data-id="${esc(a.id)}">✓ Hecho hoy</button><button class="text-button" data-act="edit-activity" data-id="${esc(a.id)}">Editar</button><button class="text-button danger" data-act="del-activity" data-id="${esc(a.id)}">Eliminar</button></div>
+        </article>`; }).join('')}</div>`).join('') || '<p class="empty">Aún no hay hobbies. Añade el primero más abajo.</p>'}
+    <section class="panel" id="activity-form-panel">
+      <h2>${edit ? 'Editar hobby' : 'Añade un hobby'}</h2>
+      <form id="activity-form" class="form-grid" autocomplete="off">
+        <label class="fld span2"><span>Hobby</span><input class="field" name="name" placeholder="Ej. Hacer un puzzle" value="${esc(v.name)}" required></label>
+        <p class="hint span2" id="hobby-hint" aria-live="polite"></p>
+        <label class="fld"><span>Categoría</span><input class="field" name="stack" list="stack-list" placeholder="Sofá, Creatividad…" value="${esc(v.stack)}" required></label>
+        <datalist id="stack-list">${stacks.map(s => `<option value="${esc(s)}">`).join('')}</datalist>
+        <label class="fld"><span>Minutos por sesión</span><input class="field" name="minutes" type="number" min="5" max="300" step="5" value="${esc(v.minutes)}"></label>
+        <label class="fld"><span>Energía</span><select name="energy">${opts(ENERGY, v.energy)}</select></label>
+        <label class="fld"><span>Veces por semana (opcional)</span><input class="field" name="goal" type="number" min="0" max="14" placeholder="Ej. 3" value="${goalOf(v) || ''}"></label>
+        <label class="fld span2"><span>Etiquetas</span><input class="field" name="tags" placeholder="Ej. sin preparar, sofá" value="${esc(v.tags)}"></label>
+        <div class="form-actions span2"><button class="primary">${edit ? 'Guardar cambios' : 'Guardar'}</button>${edit ? '<button type="button" class="text-button" data-act="cancel-edit">Cancelar</button>' : ''}</div>
+      </form>
+    </section>
+    <section class="plan"><p class="eyebrow">PLAN SUGERIDO</p><h3>¿Qué encaja ahora?</h3><p class="muted">Dinos cuánto tiempo tienes y te proponemos una combinación de categorías distintas.</p>
+      <div class="form-row"><select id="free-time" aria-label="Tiempo"><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60" selected>1 hora</option><option value="90">1 hora y media</option><option value="120">2 horas</option></select>
       <select id="free-energy" aria-label="Energía">${opts(ENERGY, 'Baja')}</select><button class="primary" data-act="suggest">Buscar mi plan ✧</button></div>
       <div id="plan-result" class="muted"></div></section>`;
 }
 function suggest() {
   const mins = +$('#free-time').value, energy = $('#free-energy').value;
-  const allowed = data.activities.filter(a => ENERGY.indexOf(a.energy) <= ENERGY.indexOf(energy)).sort((x, y) => x.minutes - y.minutes);
-  const chosen = []; let left = mins;
-  for (const a of allowed) { if (a.minutes <= left) { chosen.push(a); left -= a.minutes; } if (left < 10) break; }
+  const allowed = data.activities.filter(a => ENERGY.indexOf(a.energy) <= ENERGY.indexOf(energy));
+  const chosen = pickMix(allowed, mins);
+  const total = chosen.reduce((t, a) => t + a.minutes, 0), cats = new Set(chosen.map(a => a.stack)).size;
   $('#plan-result').innerHTML = chosen.length
-    ? `<strong>${chosen.map(a => esc(a.name)).join(' + ')}</strong><br>Un plan de ${mins - left} minutos para ti.`
+    ? `<ul class="plan-list">${chosen.map(a => `<li><b>${esc(a.name)}</b> <small>${a.minutes} min · ${esc(a.stack)}</small></li>`).join('')}</ul>
+       <p>Un plan de ${total} minutos${cats > 1 ? ` con ${cats} categorías distintas` : ''}. Púlsalo de nuevo para otra combinación.</p>`
     : 'Aún no hay actividades que encajen. Añade alguna más o prueba con más tiempo.';
 }
 
@@ -581,7 +743,7 @@ const actions = {
     data.spaces = data.spaces.filter(x => !same(x.id, s.id));
     save(); render();
   },
-  'edit-activity': id => { ui.editActivity = id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
+  'edit-activity': id => { ui.editActivity = id; render(); const p = $('#activity-form-panel'); if (p) p.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
   'cancel-edit': () => { ui.editActivity = null; render(); },
   'sync-signin': () => window.LifeSync && window.LifeSync.signIn(),
   'signin-dismiss': () => { try { localStorage.setItem(HIDE_SIGNIN_KEY, '1'); } catch {} render(); },
@@ -609,6 +771,7 @@ const actions = {
     const a = byId(data.activities, id);
     if (!a || !confirm(`¿Eliminar «${a.name}»?`)) return;
     data.activities = data.activities.filter(x => !same(x.id, id));
+    data.log = data.log.filter(l => !same(l.activityId, id));
     if (same(ui.editActivity, id)) ui.editActivity = null;
     save(); render();
   },
@@ -622,7 +785,29 @@ const actions = {
   'week-next': () => { ui.weekOffset++; render(); },
   'week-today': () => { ui.weekOffset = 0; render(); },
   'del-event': id => { data.events = data.events.filter(e => !same(e.id, id)); save(); render(); },
-  'del-routine': id => { data.routines = data.routines.filter(r => !same(r.id, id)); save(); render(); },
+  'del-routine': id => { data.routines = data.routines.filter(r => !same(r.id, id)); if (same(ui.editRoutine, id)) ui.editRoutine = null; save(); render(); },
+  'edit-routine': id => { ui.editRoutine = id; ui.calSettings = true; render(); const p = $('#routine-form'); if (p) p.scrollIntoView({ behavior: 'smooth', block: 'center' }); },
+  'cancel-routine-edit': () => { ui.editRoutine = null; render(); },
+  'toggle-work': id => { const sp = byId(data.spaces, id); if (!sp) return; sp.work = !isWorkSpace(sp); save(); render(); },
+  'log-hobby': id => {
+    const a = byId(data.activities, id); if (!a) return;
+    data.log.push({ id: uid(), date: today(), activityId: a.id, minutes: +a.minutes || 0 });
+    save(); render();
+  },
+  'del-log': id => { data.log = data.log.filter(l => !same(l.id, id)); save(); render(); },
+  'plan-add': (id, b) => {
+    const d = b.dataset, st = +d.start, m = Math.max(5, Math.min(+d.min || 30, 1439 - st));
+    let text = 'Descansar un rato';
+    if (d.kind === 'task') { const t = byId(data.tasks, d.ref); if (!t) return; text = t.name; }
+    else if (d.kind === 'hobby') { const a = byId(data.activities, d.ref); if (!a) return; text = a.name; }
+    data.plan.push({ id: uid(), date: today(), start: fmtMin(st), end: fmtMin(st + m), kind: d.kind, refId: d.ref || '', text, done: false });
+    save(); render();
+  },
+  'del-plan': id => {
+    data.plan = data.plan.filter(p => !same(p.id, id));
+    data.log = data.log.filter(l => !same(l.planId, id));
+    save(); render();
+  },
   'clear-ics': () => {
     if (!confirm('¿Quitar todos los eventos importados desde .ics?')) return;
     data.events = data.events.filter(e => e.src !== 'ics'); save(); render();
@@ -653,11 +838,11 @@ const forms = {
   },
   'space-form': f => {
     const name = f.name.value.trim(); if (!name) return;
-    const sp = { id: uid(), name, color: COLORS[data.spaces.length % COLORS.length] };
+    const sp = { id: uid(), name, color: COLORS[data.spaces.length % COLORS.length], work: !!(f.work && f.work.checked) || WORK_RE.test(name) };
     data.spaces.push(sp); save(); render();
   },
   'activity-form': f => {
-    const item = { name: f.name.value.trim(), stack: f.stack.value.trim(), minutes: +f.minutes.value || 20, energy: f.energy.value, tags: f.tags.value.trim() };
+    const item = { name: f.name.value.trim(), stack: f.stack.value.trim(), minutes: +f.minutes.value || 20, energy: f.energy.value, tags: f.tags.value.trim(), goal: Math.max(0, Math.min(14, Math.round(+f.goal.value || 0))) };
     const edit = byId(data.activities, ui.editActivity);
     if (edit) Object.assign(edit, item); else data.activities.push({ id: uid(), ...item });
     ui.editActivity = null; save(); render();
@@ -671,12 +856,14 @@ const forms = {
     const days = [...f.querySelectorAll('input[name=day]:checked')].map(c => +c.value);
     if (!days.length) { alert('Elige al menos un día.'); return; }
     if (toMin(f.end.value) <= toMin(f.start.value)) { alert('La hora de fin debe ser posterior a la de inicio.'); return; }
-    data.routines.push({ id: uid(), name: f.name.value.trim(), days, start: f.start.value, end: f.end.value });
-    save(); render();
+    const r = { name: f.name.value.trim(), days, start: f.start.value, end: f.end.value, work: !!f.work.checked };
+    const edit = byId(data.routines, ui.editRoutine);
+    if (edit) Object.assign(edit, r); else data.routines.push({ id: uid(), ...r });
+    ui.editRoutine = null; save(); render();
   },
   'settings-form': f => {
     if (toMin(f.dayEnd.value) <= toMin(f.dayStart.value)) { alert('El final de la jornada debe ser posterior al inicio.'); return; }
-    Object.assign(data.settings, { dayStart: f.dayStart.value, dayEnd: f.dayEnd.value });
+    Object.assign(data.settings, { dayStart: f.dayStart.value, dayEnd: f.dayEnd.value, workLimit: Math.max(1, Math.min(16, +f.workLimit.value || 6)) });
     save(); render();
   }
 };
@@ -696,6 +883,18 @@ app.addEventListener('change', async e => {
   if (t.dataset.task !== undefined) {
     const task = byId(data.tasks, t.dataset.task);
     if (task) { task.done = t.checked; save(); render(); }
+  } else if (t.dataset.plan !== undefined) {
+    const pl = byId(data.plan, t.dataset.plan);
+    if (pl) {
+      pl.done = t.checked;
+      if (pl.kind === 'task') { const tk = byId(data.tasks, pl.refId); if (tk) tk.done = t.checked; }
+      if (pl.kind === 'hobby') { // hacerlo en tu día cuenta como sesión en el tracker
+        data.log = data.log.filter(l => !same(l.planId, pl.id));
+        const a = byId(data.activities, pl.refId);
+        if (t.checked && a) data.log.push({ id: uid(), date: pl.date, activityId: a.id, minutes: Math.max(5, toMin(pl.end) - toMin(pl.start)), planId: pl.id });
+      }
+      save(); render();
+    }
   } else if (t.closest && t.closest('#theme-form')) {
     data.settings.season = t.form.season.value; data.settings.phase = t.form.phase.value;
     save(); applyTheme(); render();
@@ -708,6 +907,13 @@ app.addEventListener('change', async e => {
     try { data = normalize(JSON.parse(await t.files[0].text())); save(); render(); alert('Copia importada.'); }
     catch { alert('No se ha podido leer ese archivo.'); }
   }
+});
+
+app.addEventListener('input', e => { // al escribir un hobby, sugiere minutos, energía, categoría y veces por semana
+  const t = e.target, f = t.form;
+  if (!f || f.id !== 'activity-form') return;
+  if (t.name === 'name' && !ui.editActivity) applyHobbyHint(f);
+  else if (['minutes', 'energy', 'stack', 'tags', 'goal'].includes(t.name)) f.dataset['t' + t.name] = '1';
 });
 
 $$('.nav').forEach(b => b.onclick = () => page(b.dataset.view));
