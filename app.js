@@ -17,6 +17,7 @@ const initial = {
   events: [],
   plan: [],
   log: [],
+  sky: { best: {}, seen: 0 },
   settings: { dayStart: '08:00', dayEnd: '22:00', season: 'auto', phase: 'auto', workLimit: 6 },
   activities: [
     { id: 1, name: 'Murdoku', stack: 'Sofá', minutes: 20, energy: 'Baja', tags: 'sin preparar, sofá' },
@@ -30,12 +31,16 @@ const initial = {
 function normalize(raw) {
   const d = Object.assign(structuredClone(initial), raw && typeof raw === 'object' ? raw : {});
   ['tasks', 'activities', 'events', 'spaces', 'routines', 'dump', 'plan', 'log'].forEach(k => { if (!Array.isArray(d[k])) d[k] = []; });
+  d.sky = Object.assign({ best: {}, seen: 0 }, d.sky && typeof d.sky === 'object' ? d.sky : {});
+  if (!d.sky.best || typeof d.sky.best !== 'object') d.sky.best = {};
   d.settings = Object.assign({ dayStart: '08:00', dayEnd: '22:00', season: 'auto', phase: 'auto', workLimit: 6 }, d.settings);
   return d;
 }
 let data;
 try { data = normalize(JSON.parse(localStorage.getItem(KEY))); } catch { data = normalize(null); }
 function save() {
+  const before = skyList().length; updateSky(); const after = skyList().length;
+  if (after > before) celebrate(before, after);
   data.meta = { updatedAt: Date.now() };
   try { localStorage.setItem(KEY, JSON.stringify(data)); } catch {}
   if (window.LifeSync) window.LifeSync.push();
@@ -196,7 +201,7 @@ function page(view) {
 }
 function render() {
   $$('.nav').forEach(b => b.classList.toggle('active', b.dataset.view === ui.view));
-  ({ today: renderHome, tasks: renderTasks, calendar: renderCalendar, brain: renderBrain, space: renderSpace }[ui.view] || renderHome)();
+  ({ today: renderHome, tasks: renderTasks, calendar: renderCalendar, brain: renderBrain, sky: renderSky, space: renderSpace }[ui.view] || renderHome)();
 }
 const head = (t, sub) => `<p class="eyebrow">PLANET ME</p><h1 class="view-title">${t}</h1><p class="view-intro">${sub}</p>`;
 
@@ -693,6 +698,98 @@ function suggest() {
     : 'Aún no hay actividades que encajen. Añade alguna más o prueba con más tiempo.';
 }
 
+/* ---------- Mi cielo: estrellas, niveles y planetas ---------- */
+const STARS_PER_LEVEL = 15;
+const LEVELS = ['Soñadora', 'Exploradora', 'Navegante', 'Astrónoma', 'Cartógrafa del cielo', 'Guardiana de estrellas', 'Viajera cósmica', 'Maestra de constelaciones', 'Leyenda del cielo'];
+const PLANETS = [['Luna', '#f1eee4', '#b4ad9b'], ['Mercurio', '#d8cdbd', '#8c7e6c'], ['Venus', '#f8dcae', '#cf9455'], ['Marte', '#eba384', '#a84b33'], ['Júpiter', '#efcfa6', '#b0764a'], ['Saturno', '#f4e0a4', '#c49a45'], ['Urano', '#c0e8ea', '#68acb5'], ['Neptuno', '#a2bff5', '#4561c2']];
+const STAR_KINDS = { t: { name: 'tarea', color: '#e8b64a' }, h: { name: 'hobby', color: '#c58ad8' }, r: { name: 'descanso', color: '#7fb6e6' }, b: { name: 'equilibrio', color: '#fff3c4' } };
+const levelOf = n => 1 + Math.floor(n / STARS_PER_LEVEL);
+const weekKey = ds => ymd(mondayOf(parseYmd(ds)));
+function weekStats() { // puntos de cada semana: tareas (la prioridad alta vale doble), sesiones de hobby y descansos hechos
+  const w = {}, g = k => w[k] || (w[k] = { tp: 0, h: 0, r: 0 });
+  data.tasks.forEach(t => { if (t.done && t.doneAt) g(weekKey(t.doneAt)).tp += prioOf(t) === 'Alta' ? 2 : 1; });
+  data.log.forEach(l => { if (l.date) g(weekKey(l.date)).h++; });
+  data.plan.forEach(p => { if (p.kind === 'rest' && p.done && p.date) g(weekKey(p.date)).r++; });
+  return w;
+}
+const starsOfWeek = c => ({ t: Math.floor(c.tp / 3), h: Math.floor(c.h / 5), r: Math.floor(c.r / 3), b: c.tp >= 1 && c.h >= 1 && c.r >= 1 ? 1 : 0 });
+function updateSky() { // las estrellas ganadas no se pierden aunque luego desmarques algo
+  const st = weekStats(), best = data.sky.best;
+  for (const k in st) {
+    const c = starsOfWeek(st[k]);
+    if (!best[k] && !(c.t || c.h || c.r || c.b)) continue;
+    const b = best[k] || (best[k] = { t: 0, h: 0, r: 0, b: 0 });
+    for (const x in c) b[x] = Math.max(+b[x] || 0, c[x]);
+  }
+}
+function skyList() {
+  const out = [];
+  Object.keys(data.sky.best).sort().forEach(k => { const b = data.sky.best[k]; for (const x of ['t', 'h', 'r', 'b']) for (let i = 0; i < (+b[x] || 0); i++) out.push({ k, x }); });
+  return out;
+}
+function toast(msg) {
+  let el = $('#toast');
+  if (!el) { el = document.createElement('div'); el.id = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 4500);
+}
+function celebrate(b, a) {
+  const lb = levelOf(b), la = levelOf(a);
+  toast(la > lb ? `🪐 ¡Subes al nivel ${la}!${PLANETS[la - 2] ? ' Nuevo planeta: ' + PLANETS[la - 2][0] : ''}` : '✦ ¡Has ganado una estrella para tu cielo!');
+}
+function rnd(str) { // hash con buena dispersión (0–1) para colocar las estrellas
+  let h = 2166136261; for (const c of String(str)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); }
+  h ^= h >>> 15; h = Math.imul(h, 2246822507); h ^= h >>> 13; h = Math.imul(h, 3266489909); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function skySvg(stars, base, seen, mini) {
+  const W = 400, H = 260, N = STARS_PER_LEVEL;
+  const pts = stars.map((s, j) => ({ k: s.k, kind: s.x, x: 28 + j * (W - 56) / (N - 1) + (rnd('x' + (base + j)) - .5) * 24, y: 36 + rnd('y' + (base + j)) * (H - 72), isNew: base + j >= seen }));
+  const line = pts.length > 1 ? `<polyline class="c-line" points="${pts.map(q => q.x.toFixed(1) + ',' + q.y.toFixed(1)).join(' ')}"/>` : '';
+  const dots = pts.map((q, j) => `<circle class="c-star${q.isNew && !mini ? ' new' : ''}" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="${mini ? 3 : 4}" fill="${STAR_KINDS[q.kind].color}" style="--d:${(j % 5) * .5}s;color:${STAR_KINDS[q.kind].color}"><title>Semana del ${fmtDate(q.k)} · estrella de ${STAR_KINDS[q.kind].name}</title></circle>`).join('');
+  return `<svg class="${mini ? 'sky-mini' : 'sky-svg'}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Constelación">${line}${dots}</svg>`;
+}
+function renderSky() {
+  const list = skyList(), total = list.length, level = levelOf(total), seen = data.sky.seen || 0;
+  const into = total % STARS_PER_LEVEL, pct = Math.round(into / STARS_PER_LEVEL * 100);
+  const cur = weekStats()[weekStartYmd()] || { tp: 0, h: 0, r: 0 };
+  const done = Math.floor(total / STARS_PER_LEVEL);
+  const chunk = list.slice(done * STARS_PER_LEVEL);
+  const minis = Array.from({ length: done }, (_, i) => `<div class="mini-wrap">${skySvg(list.slice(i * STARS_PER_LEVEL, (i + 1) * STARS_PER_LEVEL), i * STARS_PER_LEVEL, seen, true)}<small>Constelación ${i + 1}</small></div>`).join('');
+  const planets = PLANETS.slice(0, Math.max(0, level - 1)), next = PLANETS[level - 1];
+  const weeks = Object.keys(data.sky.best).sort().reverse().slice(0, 6).map(k => {
+    const b = data.sky.best[k], n = ['t', 'h', 'r', 'b'].reduce((t, x) => t + (+b[x] || 0), 0);
+    return `<div class="wk"><span>Semana del ${fmtDate(k)}</span><span class="wk-stars">${['t', 'h', 'r', 'b'].map(x => `<i style="color:${STAR_KINDS[x].color}">${'★'.repeat(+b[x] || 0)}</i>`).join('')}</span><small>${n}</small></div>`;
+  }).join('');
+  const nextTxt = (v, n, noun) => `${v % n} de ${n} ${noun}`;
+  const bal = [['tarea', cur.tp >= 1], ['hobby', cur.h >= 1], ['descanso', cur.r >= 1]];
+  $('#app').innerHTML = head('Mi cielo', 'Cada cosa que haces suma, también descansar. Aquí crece tu constelación.') + `
+    <section class="panel sky-hero">
+      <div class="sky-top"><div><p class="eyebrow">NIVEL ${level}</p><h2>${esc(LEVELS[Math.min(level - 1, LEVELS.length - 1)])}</h2></div><div class="sky-total"><strong>${total}</strong><small>${total === 1 ? 'estrella' : 'estrellas'}</small></div></div>
+      <div class="sky-stage">${total ? skySvg(chunk, done * STARS_PER_LEVEL, seen, false) : '<p class="sky-empty">Tu cielo está esperando su primera estrella ✦</p>'}</div>
+      <div class="bar" role="progressbar" aria-valuenow="${into}" aria-valuemin="0" aria-valuemax="${STARS_PER_LEVEL}"><i style="width:${pct}%"></i></div>
+      <p class="muted">${into} de ${STARS_PER_LEVEL} estrellas para el nivel ${level + 1}${next ? ' y desbloquear a ' + next[0] : ''}.</p>
+    </section>
+    <section class="panel">
+      <p class="eyebrow">ESTA SEMANA</p><h2>Tu próxima estrella</h2>
+      <div class="trk-row"><div class="trk-top"><b><i style="color:${STAR_KINDS.t.color}">★</i> Tareas</b><small>${nextTxt(cur.tp, 3, 'puntos')} · las de prioridad alta valen doble</small></div><div class="bar"><i style="width:${(cur.tp % 3) / 3 * 100}%"></i></div></div>
+      <div class="trk-row"><div class="trk-top"><b><i style="color:${STAR_KINDS.h.color}">★</i> Hobbies</b><small>${nextTxt(cur.h, 5, 'sesiones')}</small></div><div class="bar"><i style="width:${(cur.h % 5) / 5 * 100}%"></i></div></div>
+      <div class="trk-row"><div class="trk-top"><b><i style="color:${STAR_KINDS.r.color}">★</i> Descansos</b><small>${nextTxt(cur.r, 3, 'descansos de tu día')}</small></div><div class="bar"><i style="width:${(cur.r % 3) / 3 * 100}%"></i></div></div>
+      <div class="trk-row"><div class="trk-top"><b><i style="color:${STAR_KINDS.b.color}">★</i> Equilibrio</b><small>${bal.map(([n, ok]) => (ok ? '✓ ' : '○ ') + n).join(' · ')}</small></div></div>
+      <details class="sugg-more"><summary>¿Cómo se ganan las estrellas?</summary>
+        <p class="muted">★ Una por cada 3 puntos de tareas (1 punto por tarea, 2 si es de prioridad alta).<br>★ Una por cada 5 sesiones de hobby.<br>★ Una por cada 3 descansos que añadas a tu día y marques como hechos.<br>★ Una extra si en la misma semana haces una tarea, un hobby y un descanso.<br>Las semanas empiezan el lunes. Las estrellas ganadas nunca se pierden.</p></details>
+    </section>
+    <section class="panel">
+      <p class="eyebrow">TUS PLANETAS</p><h2>Planetas desbloqueados</h2>
+      <div class="planets">${planets.map(([n, a, b]) => `<div class="planet${n === 'Saturno' ? ' ringed' : ''}" style="--a:${a};--b:${b}"><i></i><span>${n}</span></div>`).join('')}
+        ${next ? `<div class="planet locked"><i></i><span>Nivel ${level + 1}</span></div>` : ''}</div>
+      ${planets.length ? '' : '<p class="muted">Llega al nivel 2 (15 estrellas) y aparecerá tu primer planeta.</p>'}
+    </section>
+    ${done ? `<section class="panel"><p class="eyebrow">CONSTELACIONES COMPLETADAS</p><h2>Tu mapa del cielo</h2><div class="minis">${minis}</div></section>` : ''}
+    ${weeks ? `<section class="panel"><p class="eyebrow">HISTORIAL</p><h2>Últimas semanas</h2>${weeks}</section>` : ''}`;
+  if (data.sky.seen !== total) { data.sky.seen = total; save(); }
+}
+
 /* ---------- Mi espacio ---------- */
 function dumpRow(d) {
   return `<div class="item dump-item"><div class="task-main"><span>${esc(d.text)}</span><div class="meta"><span class="meta-t">${fmtDate(d.created.slice(0, 10))}</span></div></div>
@@ -926,12 +1023,12 @@ app.addEventListener('change', async e => {
   const t = e.target;
   if (t.dataset.task !== undefined) {
     const task = byId(data.tasks, t.dataset.task);
-    if (task) { task.done = t.checked; save(); render(); }
+    if (task) { task.done = t.checked; task.doneAt = t.checked ? today() : ''; save(); render(); }
   } else if (t.dataset.plan !== undefined) {
     const pl = byId(data.plan, t.dataset.plan);
     if (pl) {
       pl.done = t.checked;
-      if (pl.kind === 'task') { const tk = byId(data.tasks, pl.refId); if (tk) tk.done = t.checked; }
+      if (pl.kind === 'task') { const tk = byId(data.tasks, pl.refId); if (tk) { tk.done = t.checked; tk.doneAt = t.checked ? pl.date : ''; } }
       if (pl.kind === 'hobby') { // hacerlo en tu día cuenta como sesión en el tracker
         data.log = data.log.filter(l => !same(l.planId, pl.id));
         const a = byId(data.activities, pl.refId);

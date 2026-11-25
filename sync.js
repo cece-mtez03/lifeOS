@@ -34,6 +34,9 @@ function merge(local, cloud) { // une por id; si un elemento está en ambos, gan
     const seen = new Set(out[k].map(x => String(x.id)));
     for (const x of local[k] || []) if (!seen.has(String(x.id))) out[k].push(x);
   }
+  const best = { ...((local.sky && local.sky.best) || {}) }; // las estrellas ganadas se conservan: gana el máximo de cada tipo
+  for (const [wk, b] of Object.entries((cloud.sky && cloud.sky.best) || {})) { const o = best[wk] || {}; best[wk] = {}; for (const x of ['t', 'h', 'r', 'b']) best[wk][x] = Math.max(+o[x] || 0, +b[x] || 0); }
+  out.sky = { best, seen: 0 };
   return out;
 }
 

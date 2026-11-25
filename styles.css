@@ -145,3 +145,31 @@ body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .log-form{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.3rem 0 .8rem}
 .log-form select,.log-form input{min-width:0;flex:1 1 140px;padding:.55rem .7rem;border-radius:12px;border:1px solid var(--line,#e5dccd);background:var(--card,#fff);font:inherit;color:inherit}
 .date-edit{font:inherit;color:inherit;background:transparent;border:1px dashed var(--line,#d9cdb8);border-radius:8px;padding:.1rem .3rem}
+
+/* v12 · Mi cielo */
+.sky-hero{background:linear-gradient(160deg,#2b2447,#3d2f5c 55%,#5a3d62);color:#f6efe4;border:0}
+.sky-hero .muted,.sky-hero .eyebrow{color:#d9cde6}.sky-hero h2{color:#fff}
+.sky-top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+.sky-total{text-align:right}.sky-total strong{font-size:2.2rem;line-height:1;display:block}.sky-total small{color:#d9cde6}
+.sky-stage{margin:.6rem 0;min-height:140px;border-radius:16px;background:radial-gradient(circle at 30% 20%,rgba(255,255,255,.08),transparent 60%),rgba(0,0,0,.18)}
+.sky-svg{width:100%;height:auto;display:block}.sky-empty{padding:3rem 1rem;text-align:center;color:#d9cde6}
+.c-line{fill:none;stroke:rgba(255,255,255,.35);stroke-width:1.2;stroke-dasharray:4 4}
+.c-star{filter:drop-shadow(0 0 5px currentColor);animation:twinkle 3.2s ease-in-out infinite;animation-delay:var(--d,0s)}
+.c-star.new{animation:pop 1.2s ease-out 3}
+@keyframes twinkle{0%,100%{opacity:.75}50%{opacity:1}}
+@keyframes pop{0%{transform-box:fill-box;transform-origin:center;transform:scale(.2)}60%{transform:scale(2.2)}100%{transform:scale(1)}}
+.sky-hero .bar{background:rgba(255,255,255,.2)}.sky-hero .bar i{background:#f3c969}
+.planets{display:flex;flex-wrap:wrap;gap:16px;margin-top:.6rem}
+.planet{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:.85rem}
+.planet i{width:54px;height:54px;border-radius:50%;background:radial-gradient(circle at 32% 28%,var(--a),var(--b));box-shadow:0 4px 12px rgba(0,0,0,.2);position:relative;display:block}
+.planet.ringed i::after{content:"";position:absolute;left:-12px;right:-12px;top:50%;height:14px;margin-top:-7px;border:3px solid rgba(201,154,69,.8);border-radius:50%;transform:rotate(-18deg)}
+.planet.locked i{background:rgba(120,110,130,.25);box-shadow:none;border:2px dashed rgba(120,110,130,.5)}
+.planet.locked span{color:var(--muted)}
+.minis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.mini-wrap{background:#3d2f5c;border-radius:12px;padding:6px;text-align:center;color:#d9cde6}.sky-mini{width:100%;height:auto}
+.wk{display:flex;align-items:center;gap:10px;padding:.4rem 0;border-top:1px solid var(--line,#eadfce)}.wk span:first-child{flex:1}
+.wk-stars i{font-style:normal;letter-spacing:1px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,30px);opacity:0;pointer-events:none;background:#3d2f5c;color:#fff;padding:.7rem 1.1rem;border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.3);transition:.35s;z-index:99;max-width:90vw;text-align:center}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+.sky-svg{max-width:560px;margin:0 auto}
+.c-star{transform-box:fill-box;transform-origin:center}
