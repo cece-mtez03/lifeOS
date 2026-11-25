@@ -194,3 +194,11 @@ body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .hbar b{font-size:.8rem;min-width:52px;text-align:right;font-weight:500}
 .log-form select,.log-form input{color:var(--ink);background:var(--field);color-scheme:light dark}
 .date-edit{color:var(--ink);color-scheme:light dark}
+
+/* v14 · resúmenes */
+.recap-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:.4rem 0 .8rem}
+.recap-grid div{background:var(--soft,#edf2e9);border-radius:14px;padding:12px;text-align:center}
+.recap-grid strong{display:block;font:500 1.8rem 'Fraunces',serif;color:var(--head,#173f32)}
+.recap-grid small{color:var(--muted);font-size:.75rem}.recap-grid i{font-style:normal}
+@media(max-width:560px){.recap-grid{grid-template-columns:repeat(2,1fr)}}
+.recap-card{background:linear-gradient(160deg,var(--soft,#edf2e9),var(--paper,#fff))}

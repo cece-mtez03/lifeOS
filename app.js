@@ -384,6 +384,7 @@ function renderHome() {
       <article class="stat"><span class="eyebrow">TIEMPO LIBRE HOY</span><strong>${dur(info.freeTotal)}</strong><small>Entre tus planes y tu horario</small></article>
     </section>
     ${skyCard()}
+    ${recapCard()}
     ${showSignin() ? `<section class="panel suggestion signin-card">
       <div><p class="eyebrow">TUS DATOS, EN TODAS PARTES</p><h2>Entra para no perder nada</h2>
         <p class="muted">Con tu cuenta de Google, tus tareas y planes se guardan y se sincronizan entre tu móvil y tu ordenador.</p></div>
@@ -684,6 +685,7 @@ function renderTracker() {
       <article class="stat"><span class="eyebrow">SESIONES EN TOTAL</span><strong>${data.log.length}</strong><small>${new Set(data.log.map(l => l.activityId)).size} hobbies distintos</small></article>
     </section>
     <section class="panel tracker"><p class="eyebrow">ESTA SEMANA</p><h2>Tus días</h2>
+      <p class="muted">Cada 5 sesiones de hobby te dan una estrella. <button class="text-button" data-act="go" data-id="sky">Ver mi cielo ✦ →</button></p>
       <div class="week-strip" aria-label="Días de esta semana con algún hobby">${strip}</div>
       <p class="muted">${wl.length ? `${wl.length} ${wl.length === 1 ? 'sesión' : 'sesiones'} · ${dur(mins)}` : 'Todavía no has registrado nada esta semana.'}</p>
       ${empty ? '<p class="empty small">Pulsa «✓ Hecho hoy» en un hobby, o márcalo como hecho en tu día, y aquí empezarán a salir tus estadísticas.</p>' : ''}
@@ -799,6 +801,40 @@ function skySvg(stars, base, seen, mini) {
   const dots = pts.map((q, j) => `<circle class="c-star${q.isNew && !mini ? ' new' : ''}" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="${mini ? 3 : 4}" fill="${STAR_KINDS[q.kind].color}" style="--d:${(j % 5) * .5}s;color:${STAR_KINDS[q.kind].color}"><title>Semana del ${fmtDate(q.k)} · estrella de ${STAR_KINDS[q.kind].name}</title></circle>`).join('');
   return `<svg class="${mini ? 'sky-mini' : 'sky-svg'}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Constelación">${line}${dots}</svg>`;
 }
+function weekRecap(wk) { // resumen de una semana (lunes = wk)
+  const e = new Date(parseYmd(wk)); e.setDate(e.getDate() + 6); const end = ymd(e);
+  const inW = d => d && d >= wk && d <= end;
+  const tasks = data.tasks.filter(t => t.done && inW(t.doneAt)).length;
+  const logs = data.log.filter(l => inW(l.date)), rests = data.plan.filter(p => p.kind === 'rest' && p.done && inW(p.date)).length;
+  const mins = logs.reduce((t, l) => t + (+l.minutes || 0), 0);
+  const cnt = {}; logs.forEach(l => { cnt[l.activityId] = (cnt[l.activityId] || 0) + 1; });
+  const topId = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0], top = topId ? byId(data.activities, topId) : null;
+  const b = data.sky.best[wk] || {}, stars = ['t', 'h', 'r', 'b'].reduce((t, x) => t + (+b[x] || 0), 0);
+  return { wk, tasks, sessions: logs.length, mins, rests, top, topN: top ? cnt[topId] : 0, b, stars, any: tasks || logs.length || rests };
+}
+function recapMsg(r) {
+  if (!r.any) return 'Semana tranquila. A veces el cielo también descansa; cuando quieras, aquí seguimos.';
+  if (r.b.b) return 'Semana equilibrada: trabajaste, disfrutaste y descansaste. Eso es vivir bien.';
+  if (r.stars) return '¡Qué semana! Tu cielo tiene luz nueva.';
+  return 'Buen avance. Un poco más y aparece tu próxima estrella.';
+}
+function recapHtml(r, title) {
+  const starRow = ['t', 'h', 'r', 'b'].map(x => +r.b[x] ? `<i style="color:${STAR_KINDS[x].color}">${'★'.repeat(+r.b[x])}</i>` : '').join('');
+  return `<p class="eyebrow">RESUMEN</p><h2>${esc(title)}</h2>
+    <div class="recap-grid"><div><strong>${r.tasks}</strong><small>${r.tasks === 1 ? 'tarea hecha' : 'tareas hechas'}</small></div>
+      <div><strong>${r.sessions}</strong><small>${r.sessions === 1 ? 'sesión de hobby' : 'sesiones de hobby'}</small></div>
+      <div><strong>${r.rests}</strong><small>${r.rests === 1 ? 'descanso' : 'descansos'}</small></div>
+      <div><strong>${r.stars}</strong><small>${r.stars === 1 ? 'estrella' : 'estrellas'} ${starRow}</small></div></div>
+    <p class="muted">${r.mins ? `Dedicaste ${dur(r.mins)} a tus hobbies${r.top ? `; el que más repetiste fue «${esc(r.top.name)}» (${r.topN} ${r.topN === 1 ? 'vez' : 'veces'})` : ''}. ` : ''}${recapMsg(r)}</p>`;
+}
+function recapCard() { // domingo: tu semana; lunes: la semana pasada
+  const dow = new Date().getDay();
+  if (dow !== 0 && dow !== 1) return '';
+  const wk = dow === 0 ? weekStartYmd() : (() => { const x = mondayOf(new Date()); x.setDate(x.getDate() - 7); return ymd(x); })();
+  const r = weekRecap(wk);
+  return `<section class="panel recap-card">${recapHtml(r, dow === 0 ? 'Tu semana, de un vistazo' : 'Tu semana pasada')}
+    <div class="form-actions"><button class="text-button" data-act="go" data-id="sky">Ver mi cielo →</button><button class="text-button" data-act="go" data-id="tracker">Ver mi tracker →</button></div></section>`;
+}
 function renderSky() {
   const list = skyList(), total = list.length, level = levelOf(total), seen = data.sky.seen || 0;
   const into = total % STARS_PER_LEVEL, pct = Math.round(into / STARS_PER_LEVEL * 100);
@@ -826,9 +862,12 @@ function renderSky() {
       <div class="trk-row"><div class="trk-top"><b><i style="color:${STAR_KINDS.h.color}">★</i> Hobbies</b><small>${nextTxt(cur.h, 5, 'sesiones')}</small></div><div class="bar"><i style="width:${(cur.h % 5) / 5 * 100}%"></i></div></div>
       <div class="trk-row"><div class="trk-top"><b><i style="color:${STAR_KINDS.r.color}">★</i> Descansos</b><small>${nextTxt(cur.r, 3, 'descansos de tu día')}</small></div><div class="bar"><i style="width:${(cur.r % 3) / 3 * 100}%"></i></div></div>
       <div class="trk-row"><div class="trk-top"><b><i style="color:${STAR_KINDS.b.color}">★</i> Equilibrio</b><small>${bal.map(([n, ok]) => (ok ? '✓ ' : '○ ') + n).join(' · ')}</small></div></div>
+      <p><button class="text-button" data-act="go" data-id="tracker">Ver mis estadísticas de hobbies →</button></p>
       <details class="sugg-more"><summary>¿Cómo se ganan las estrellas?</summary>
         <p class="muted">★ Una por cada 3 puntos de tareas (1 punto por tarea, 2 si es de prioridad alta).<br>★ Una por cada 5 sesiones de hobby.<br>★ Una por cada 3 descansos que añadas a tu día y marques como hechos.<br>★ Una extra si en la misma semana haces una tarea, un hobby y un descanso.<br>Las semanas empiezan el lunes. Las estrellas ganadas nunca se pierden.</p></details>
     </section>
+    <section class="panel recap-card">${recapHtml(weekRecap(weekStartYmd()), 'Resumen de esta semana')}</section>
+    ${(() => { const x = mondayOf(new Date()); x.setDate(x.getDate() - 7); const r = weekRecap(ymd(x)); return r.any ? `<section class="panel recap-card">${recapHtml(r, 'Semana pasada')}</section>` : ''; })()}
     <section class="panel">
       <p class="eyebrow">TUS PLANETAS</p><h2>Planetas desbloqueados</h2>
       <div class="planets">${planets.map(([n, a, b]) => `<div class="planet${n === 'Saturno' ? ' ringed' : ''}" style="--a:${a};--b:${b}"><i></i><span>${n}</span></div>`).join('')}
