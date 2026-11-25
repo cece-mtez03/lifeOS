@@ -173,3 +173,24 @@ body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 #toast.show{opacity:1;transform:translate(-50%,0)}
 .sky-svg{max-width:560px;margin:0 auto}
 .c-star{transform-box:fill-box;transform-origin:center}
+
+/* v13 · tracker y tarjeta de cielo */
+.sky-card{display:flex;align-items:center;gap:14px;width:100%;text-align:left;border:0;cursor:pointer;color:#f6efe4;font:inherit;margin:0 0 16px;padding:16px 18px;border-radius:20px;background:linear-gradient(160deg,#2b2447,#3d2f5c 55%,#5a3d62);box-shadow:0 6px 18px rgba(40,25,60,.25)}
+.sky-card .sc-icon{font-size:1.8rem;color:#f3c969;filter:drop-shadow(0 0 8px #f3c969)}
+.sky-card .sc-main{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}
+.sky-card small{color:#d9cde6;letter-spacing:.04em}.sky-card b{font-size:1.15rem}
+.sky-card .bar{background:rgba(255,255,255,.2);display:block}.sky-card .bar i{background:#f3c969;display:block}
+.sky-card .sc-go{font-size:1.3rem;color:#f3c969}
+.stats4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:700px){.stats4{grid-template-columns:repeat(2,1fr)}}
+.wk-chart{display:flex;align-items:flex-end;gap:8px;height:190px;margin-top:.6rem}
+.wk-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:4px;min-width:0}
+.wk-col b{font-size:.7rem;color:var(--muted);font-weight:500;white-space:nowrap}
+.wk-bar{width:100%;flex:1;display:flex;align-items:flex-end;background:rgba(150,130,110,.12);border-radius:8px;overflow:hidden}
+.wk-bar i{display:block;width:100%;background:var(--accent,#b8734a);border-radius:8px 8px 0 0;min-height:2px}
+.wk-col.cur .wk-bar i{filter:brightness(1.15)}.wk-col small{font-size:.68rem;color:var(--muted)}
+.hbar{display:flex;align-items:center;gap:10px;margin:.35rem 0}.hb-l{width:92px;font-size:.88rem;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hb-t{flex:1;height:10px;border-radius:6px;background:rgba(150,130,110,.15);overflow:hidden}.hb-t i{display:block;height:100%;background:var(--accent,#b8734a);border-radius:6px}
+.hbar b{font-size:.8rem;min-width:52px;text-align:right;font-weight:500}
+.log-form select,.log-form input{color:var(--ink);background:var(--field);color-scheme:light dark}
+.date-edit{color:var(--ink);color-scheme:light dark}

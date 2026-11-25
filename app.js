@@ -201,7 +201,7 @@ function page(view) {
 }
 function render() {
   $$('.nav').forEach(b => b.classList.toggle('active', b.dataset.view === ui.view));
-  ({ today: renderHome, tasks: renderTasks, calendar: renderCalendar, brain: renderBrain, sky: renderSky, space: renderSpace }[ui.view] || renderHome)();
+  ({ today: renderHome, tasks: renderTasks, calendar: renderCalendar, brain: renderBrain, tracker: renderTracker, sky: renderSky, space: renderSpace }[ui.view] || renderHome)();
 }
 const head = (t, sub) => `<p class="eyebrow">PLANET ME</p><h1 class="view-title">${t}</h1><p class="view-intro">${sub}</p>`;
 
@@ -358,6 +358,17 @@ function renderTopAccount() {
   el.title = `${S.user.email} · ${stat}`;
   el.innerHTML = (S.user.photo ? `<img src="${esc(S.user.photo)}" alt="" referrerpolicy="no-referrer">` : `<i>${esc((name[0] || '?').toUpperCase())}</i>`) + `<span>${esc(name)}</span>`;
 }
+function skyCard() {
+  const total = skyList().length, level = levelOf(total), into = total % STARS_PER_LEVEL;
+  const cur = weekStats()[weekStartYmd()] || { tp: 0, h: 0, r: 0 };
+  const next = PLANETS[level - 1];
+  return `<button type="button" class="sky-card" data-act="go" data-id="sky" aria-label="Abrir Mi cielo">
+    <span class="sc-icon" aria-hidden="true">✦</span>
+    <span class="sc-main"><small>MI CIELO · NIVEL ${level}</small><b>${esc(LEVELS[Math.min(level - 1, LEVELS.length - 1)])}</b>
+      <span class="bar"><i style="width:${Math.round(into / STARS_PER_LEVEL * 100)}%"></i></span>
+      <small>${total} ${total === 1 ? 'estrella' : 'estrellas'} · faltan ${STARS_PER_LEVEL - into} para el nivel ${level + 1}${next ? ' (' + next[0] + ')' : ''}</small></span>
+    <span class="sc-go" aria-hidden="true">→</span></button>`;
+}
 function renderHome() {
   const d = new Date(), ts = today(), nowMin = d.getHours() * 60 + d.getMinutes();
   const greeting = { manana: 'Buenos días.', tarde: 'Buenas tardes.', noche: 'Buenas noches.' }[themeNow().phase];
@@ -372,6 +383,7 @@ function renderHome() {
       <article class="stat"><span class="eyebrow">TAREAS PENDIENTES</span><strong>${data.tasks.filter(t => !t.done).length}</strong><small>Sin prisa, pero sin perderlas</small></article>
       <article class="stat"><span class="eyebrow">TIEMPO LIBRE HOY</span><strong>${dur(info.freeTotal)}</strong><small>Entre tus planes y tu horario</small></article>
     </section>
+    ${skyCard()}
     ${showSignin() ? `<section class="panel suggestion signin-card">
       <div><p class="eyebrow">TUS DATOS, EN TODAS PARTES</p><h2>Entra para no perder nada</h2>
         <p class="muted">Con tu cuenta de Google, tus tareas y planes se guardan y se sincronizan entre tu móvil y tu ordenador.</p></div>
@@ -621,43 +633,81 @@ function applyHobbyHint(f) {
   el.innerHTML = `💡 Para «${esc(name)}» te sugiero unos <b>${s.minutes} min</b>, energía ${s.energy.toLowerCase()}${s.goal ? `, ${s.goal} ${s.goal === 1 ? 'vez' : 'veces'} por semana` : ''}.${s.known ? '' : ' No lo conozco aún: es una primera idea, ajústala a tu gusto.'}${fit}`;
 }
 
-function trackerHtml() {
-  const ws = weekStartYmd();
-  const days = Array.from({ length: 7 }, (_, i) => { const x = mondayOf(new Date()); x.setDate(x.getDate() + i); return x; });
+function bestStreak() {
+  const days = [...new Set(data.log.map(l => l.date))].sort();
+  let best = 0, run = 0, prev = null;
+  for (const d of days) { run = prev && Math.round((parseYmd(d) - parseYmd(prev)) / 864e5) === 1 ? run + 1 : 1; best = Math.max(best, run); prev = d; }
+  return best;
+}
+const bars = (rows, unit) => { const mx = Math.max(1, ...rows.map(r => r.v)); return rows.map(r => `<div class="hbar"><span class="hb-l">${esc(r.l)}</span><div class="hb-t"><i style="width:${Math.round(r.v / mx * 100)}%"></i></div><b>${r.v}${unit || ''}</b></div>`).join(''); };
+function renderTracker() {
+  const ws = weekStartYmd(), mon = mondayOf(new Date());
+  const days = Array.from({ length: 7 }, (_, i) => { const x = new Date(mon); x.setDate(x.getDate() + i); return x; });
   const wl = data.log.filter(l => l.date >= ws && l.date <= ymd(days[6]));
   const mins = wl.reduce((t, l) => t + (+l.minutes || 0), 0);
-  const distinct = new Set(wl.map(l => String(l.activityId))).size;
-  const st = streak();
+  const st = streak(), best = bestStreak();
   const strip = days.map(d => {
     const ds = ymd(d), n = wl.filter(l => l.date === ds).length;
     return `<div class="wd${n ? ' on' : ''}${ds === today() ? ' today' : ''}"><span>${DAY_SHORT[d.getDay()]}</span><i>${n || ''}</i></div>`;
   }).join('');
-  const rows = data.activities.filter(a => goalOf(a) || weekCount(a.id)).map(a => {
-    const n = weekCount(a.id), g = goalOf(a);
-    return `<div class="trk-row"><div class="trk-top"><b>${esc(a.name)}</b><small>${n}${g ? ' de ' + g : ''} ${n === 1 && !g ? 'vez' : 'veces'} esta semana · última: ${ago(lastDone(a.id))}</small></div>${g ? `<div class="bar" role="progressbar" aria-valuenow="${n}" aria-valuemin="0" aria-valuemax="${g}"><i style="width:${Math.min(100, Math.round(n / g * 100))}%"></i></div>` : ''}</div>`;
-  }).join('');
-  const recent = [...data.log].sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8).map(l => {
+  // últimas 8 semanas (minutos)
+  const wk = Array.from({ length: 8 }, (_, i) => { const x = new Date(mon); x.setDate(x.getDate() - 7 * (7 - i)); return x; }).map(x => {
+    const a = ymd(x), e = new Date(x); e.setDate(e.getDate() + 6);
+    const ls = data.log.filter(l => l.date >= a && l.date <= ymd(e));
+    return { l: fmtDate(a), v: ls.reduce((t, l) => t + (+l.minutes || 0), 0), n: ls.length };
+  });
+  const wmax = Math.max(1, ...wk.map(w => w.v));
+  const chart = `<div class="wk-chart" role="img" aria-label="Minutos de hobbies por semana">${wk.map((w, i) => `<div class="wk-col${i === 7 ? ' cur' : ''}"><b>${w.v ? dur(w.v) : ''}</b><div class="wk-bar"><i style="height:${Math.round(w.v / wmax * 100)}%"></i></div><small>${esc(w.l)}</small></div>`).join('')}</div>`;
+  // últimos 30 días: por categoría y por día de la semana
+  const d30 = new Date(); d30.setDate(d30.getDate() - 29); const from = ymd(d30);
+  const l30 = data.log.filter(l => l.date >= from && l.date <= today());
+  const catMap = {}; l30.forEach(l => { const a = byId(data.activities, l.activityId); const c = a ? a.stack : 'Otros'; catMap[c] = (catMap[c] || 0) + (+l.minutes || 0); });
+  const cats = Object.entries(catMap).sort((a, b) => b[1] - a[1]).map(([l, v]) => ({ l, v }));
+  const dow = [1, 2, 3, 4, 5, 6, 0].map(g => ({ l: ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][g], v: l30.filter(l => parseYmd(l.date).getDay() === g).length }));
+  const topDay = dow.slice().sort((a, b) => b.v - a.v)[0];
+  // por hobby
+  const per = data.activities.map(a => ({ a, n: logsOf(a.id).length, m: logsOf(a.id).reduce((t, l) => t + (+l.minutes || 0), 0), w: weekCount(a.id), g: goalOf(a) }))
+    .filter(x => x.n || x.g).sort((x, y) => y.n - x.n);
+  const rows = per.map(({ a, n, m, w, g }) => `<div class="trk-row"><div class="trk-top"><b>${esc(a.name)}</b><small>${n} ${n === 1 ? 'sesión' : 'sesiones'} · ${dur(m)} en total · última: ${ago(lastDone(a.id))}</small></div>
+    ${g ? `<div class="bar" role="progressbar" aria-valuenow="${w}" aria-valuemin="0" aria-valuemax="${g}"><i style="width:${Math.min(100, Math.round(w / g * 100))}%"></i></div><small class="muted">Esta semana ${w} de ${g}</small>` : ''}</div>`).join('');
+  const never = data.activities.filter(a => !logsOf(a.id).length && !goalOf(a));
+  const recent = [...data.log].sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 10).map(l => {
     const a = byId(data.activities, l.activityId);
     return `<div class="item"><span>✓ ${esc(a ? a.name : 'Hobby eliminado')}</span><small>${+l.minutes ? l.minutes + ' min · ' : ''}<input type="date" class="date-edit" data-logdate="${esc(l.id)}" value="${esc(l.date)}" max="${today()}" aria-label="Fecha en la que lo hiciste"></small><button class="icon-btn" data-act="del-log" data-id="${esc(l.id)}" aria-label="Borrar sesión">×</button></div>`;
   }).join('');
-  return `<section class="panel tracker">
-    <p class="eyebrow">TRACKER</p><h2>Mi semana de hobbies</h2>
-    <div class="week-strip" aria-label="Días de esta semana con algún hobby">${strip}</div>
-    <p class="muted">${wl.length ? `${wl.length} ${wl.length === 1 ? 'sesión' : 'sesiones'} · ${dur(mins)} · ${distinct} ${distinct === 1 ? 'hobby' : 'hobbies'}` : 'Todavía no has registrado nada esta semana.'}${st >= 2 ? ` · racha de ${st} días seguidos` : ''}</p>
-    ${rows || '<p class="empty small">Pulsa «✓ Hecho hoy» en un hobby cuando lo hagas, o ponle un objetivo semanal, y aquí verás tu progreso.</p>'}
-    ${data.activities.length ? `<p class="eyebrow sub">¿SE TE OLVIDÓ APUNTAR ALGO?</p>
-    <form id="log-form" class="log-form"><select name="hobby" aria-label="Hobby">${data.activities.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select>
-      <input type="date" name="date" value="${ymd(new Date(Date.now() - 864e5))}" max="${today()}" aria-label="Día en que lo hiciste" required>
-      <button class="primary small">Registrar</button></form>` : ''}
-    ${recent ? `<p class="eyebrow sub">ÚLTIMAS SESIONES <small>(toca la fecha para cambiarla)</small></p>${recent}` : ''}
-  </section>`;
+  const empty = !data.log.length;
+  $('#app').innerHTML = head('Tracker', 'Cómo van tus hobbies: lo que haces, cuánto y cuándo. Para disfrutarlo, no para exigirte.') + `
+    <section class="stats stats4">
+      <article class="stat"><span class="eyebrow">SESIONES ESTA SEMANA</span><strong>${wl.length}</strong><small>${dur(mins) === '0 min' ? 'Aún nada, sin prisa' : dur(mins) + ' en total'}</small></article>
+      <article class="stat"><span class="eyebrow">RACHA ACTUAL</span><strong>${st}</strong><small>${st === 1 ? 'día' : 'días'} seguidos</small></article>
+      <article class="stat"><span class="eyebrow">MEJOR RACHA</span><strong>${best}</strong><small>${best === 1 ? 'día' : 'días'} seguidos</small></article>
+      <article class="stat"><span class="eyebrow">SESIONES EN TOTAL</span><strong>${data.log.length}</strong><small>${new Set(data.log.map(l => l.activityId)).size} hobbies distintos</small></article>
+    </section>
+    <section class="panel tracker"><p class="eyebrow">ESTA SEMANA</p><h2>Tus días</h2>
+      <div class="week-strip" aria-label="Días de esta semana con algún hobby">${strip}</div>
+      <p class="muted">${wl.length ? `${wl.length} ${wl.length === 1 ? 'sesión' : 'sesiones'} · ${dur(mins)}` : 'Todavía no has registrado nada esta semana.'}</p>
+      ${empty ? '<p class="empty small">Pulsa «✓ Hecho hoy» en un hobby, o márcalo como hecho en tu día, y aquí empezarán a salir tus estadísticas.</p>' : ''}
+    </section>
+    <section class="panel"><p class="eyebrow">EVOLUCIÓN</p><h2>Últimas 8 semanas</h2>${chart}</section>
+    ${l30.length ? `<section class="panel"><p class="eyebrow">ÚLTIMOS 30 DÍAS</p><h2>Dónde pones tu tiempo</h2>${bars(cats.map(c => ({ l: c.l, v: c.v })), ' min')}
+      <p class="eyebrow sub">POR DÍA DE LA SEMANA</p>${bars(dow)}${topDay && topDay.v ? `<p class="muted">Tu día más hobbyista: ${topDay.l.toLowerCase()}.</p>` : ''}</section>` : ''}
+    <section class="panel"><p class="eyebrow">POR HOBBY</p><h2>Tus hobbies en números</h2>
+      ${rows || '<p class="empty small">Aquí verás cuántas veces haces cada hobby.</p>'}
+      ${never.length ? `<p class="muted">Aún sin estrenar: ${never.map(a => esc(a.name)).join(', ')}.</p>` : ''}</section>
+    <section class="panel"><p class="eyebrow">REGISTRO</p><h2>Tus sesiones</h2>
+      ${data.activities.length ? `<p class="eyebrow sub">¿SE TE OLVIDÓ APUNTAR ALGO?</p>
+      <form id="log-form" class="log-form"><select name="hobby" aria-label="Hobby">${data.activities.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select>
+        <input type="date" name="date" value="${ymd(new Date(Date.now() - 864e5))}" max="${today()}" aria-label="Día en que lo hiciste" required>
+        <button class="primary small">Registrar</button></form>` : ''}
+      ${recent ? `<p class="eyebrow sub">ÚLTIMAS SESIONES <small>(toca la fecha para cambiarla)</small></p>${recent}` : ''}
+    </section>`;
 }
 
 function renderBrain() {
   const edit = byId(data.activities, ui.editActivity);
   const stacks = [...new Set(data.activities.map(a => a.stack))];
   const v = edit || { name: '', stack: '', minutes: 20, energy: 'Baja', tags: '', goal: 0 };
-  $('#app').innerHTML = head('Hobbies', 'Tus hobbies organizados por categorías para que elegir qué hacer sea más fácil.') + trackerHtml() + `
+  $('#app').innerHTML = head('Hobbies', 'Tus hobbies organizados por categorías para que elegir qué hacer sea más fácil.') + `<p class="muted">¿Quieres ver cómo vas? <button class="text-button" data-act="go" data-id="tracker">Abrir mi tracker →</button></p>` + `
     <div class="section-head"><div><p class="eyebrow">TUS ACTIVIDADES</p><h2>Mis hobbies</h2></div></div>
     ${stacks.map(s => `
       <div class="stack-head"><h3>${esc(s)}</h3><button class="text-button" data-act="rename-stack" data-id="${esc(s)}">Renombrar</button></div>
