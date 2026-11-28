@@ -39,7 +39,7 @@ function normalize(raw) {
   });
   d.sky = Object.assign({ best: {}, seen: 0 }, d.sky && typeof d.sky === 'object' ? d.sky : {});
   if (!d.sky.best || typeof d.sky.best !== 'object') d.sky.best = {};
-  d.settings = Object.assign({ dayStart: '08:00', dayEnd: '22:00', season: 'auto', phase: 'auto', workLimit: 6 }, d.settings);
+  d.settings = Object.assign({ dayStart: '08:00', dayEnd: '22:00', season: 'auto', phase: 'auto', workLimit: 6, mode: 'auto', hideCats: [] }, d.settings);
   return d;
 }
 let data;
@@ -153,7 +153,9 @@ function phaseOf(d, season) {
 function themeNow() {
   const d = new Date(), t = data.settings;
   const season = SEASONS[t.season] ? t.season : seasonOf(d);
-  const phase = PHASES.includes(t.phase) ? t.phase : phaseOf(d, season);
+  let phase = PHASES.includes(t.phase) ? t.phase : phaseOf(d, season);
+  if (t.mode === 'dark') phase = 'noche';
+  else if (t.mode === 'light' && phase === 'noche') phase = 'manana';
   return { season, phase };
 }
 const themeGlyph = () => { const t = themeNow(); return t.phase === 'noche' ? '🌙' : SEASONS[t.season].glyph; };
@@ -193,12 +195,14 @@ function applyTheme() {
   if (!root) return;
   for (const k in v) root.style.setProperty(k, v[k]);
   root.dataset.season = season; root.dataset.phase = phase;
+  const mt = $('#mode-toggle');
+  if (mt) { const dk = phase === 'noche'; mt.setAttribute('aria-checked', dk ? 'true' : 'false'); mt.title = dk ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'; }
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', v['--forest']);
 }
 
 /* ---------- Estado de interfaz ---------- */
-const ui = { editRoutine: null, view: 'today', dumpNote: '', editTask: null, calSettings: false, editActivity: null, weekOffset: 0, shuffle: {}, taskView: 'spaces', onb: null, moreOpen: null };
+const ui = { editRoutine: null, view: 'today', dumpNote: '', editTask: null, calSettings: false, editActivity: null, weekOffset: 0, shuffle: {}, taskView: 'spaces', onb: null, moreOpen: null, catOpen: false, editPlan: null };
 
 function page(view) {
   ui.view = view;
@@ -240,7 +244,7 @@ function dayInfo(ds) {
   if (we - cursor >= MIN_GAP) free.push({ s: cursor, e: we });
   const freeClean = free.filter(f => f.e - f.s >= MIN_GAP);
   const slots = [...blocks.filter(b => b.kind !== 'off'), ...freeClean.map(f => ({ ...f, kind: 'free' }))].sort((a, b) => a.s - b.s || (a.kind === 'free') - (b.kind === 'free'));
-  return { slots, allDay, freeTotal: freeClean.reduce((t, f) => t + f.e - f.s, 0) };
+  return { slots, blocks, allDay, freeTotal: freeClean.reduce((t, f) => t + f.e - f.s, 0) };
 }
 function slotHtml(x) {
   const label = `<b>${fmtMin(x.s)}–${fmtMin(x.e)}</b>`;
@@ -282,6 +286,7 @@ function taskRow(t, showSpace = true) {
     ${ui.view === 'tasks' ? `<button class="icon-btn" data-act="edit-task" data-id="${esc(t.id)}" aria-label="Editar tarea">✎</button>` : ''}
     <button class="icon-btn" data-act="del-task" data-id="${esc(t.id)}" aria-label="Eliminar tarea">×</button></div>`;
 }
+const MAX_CARDS = 6; // tarjetas a la vista por hueco (descanso incluido)
 /* Sugerencias para los huecos libres de hoy */
 function suggestionsForToday(info, nowMin) {
   const ts = today();
@@ -304,7 +309,8 @@ function suggestionsForToday(info, nowMin) {
     if (len < MIN_GAP) continue;
     const options = [];
     const evening0 = start >= 20 * 60;
-    const fitC = data.activities.filter(a => a.minutes <= len && !plannedActs.has(String(a.id)) && (!evening0 || a.energy === 'Baja'));
+    const hidden = data.settings.hideCats || [];
+    const fitC = data.activities.filter(a => !hidden.includes(a.stack) && a.minutes <= len && !plannedActs.has(String(a.id)) && (!evening0 || a.energy === 'Baja'));
     const rankedC = rankActs(fitC, ts + '|' + f.s), cats = [];
     rankedC.forEach(a => { if (!cats.includes(a.stack)) cats.push(a.stack); });
     const catCards = cats.map(cat => {
@@ -329,11 +335,9 @@ function suggestionsForToday(info, nowMin) {
         text: `${esc(a.name)} <small>(${a.minutes} min · ${esc(a.stack)}${g && wk < g ? ` · ${wk}/${g} esta semana` : ''})</small>` });
     }
     options.push({ icon: '☾', kind: 'rest', ref: '', min: Math.min(30, len), text: len >= 90 ? 'Descansar un rato, un paseo o no hacer nada' : 'Descansar un rato' });
-    const taskCard = task ? { kind: 'task', ref: task.id, cat: 'Tarea', title: task.name, min: Math.min(minOf(task) || 45, len),
-      sub: `${minOf(task) ? '⏱ ' + dur(minOf(task)) : 'sin estimar'}${prioOf(task) === 'Alta' ? ' · prioridad alta' : ''}${task.date && task.date < ts ? ' · atrasada' : task.date === ts ? ' · para hoy' : ''}` } : null;
     const restCard = { kind: 'rest', ref: '', cat: 'Descanso', title: len >= 90 ? 'Descansar o pasear' : 'Descansar un rato', min: Math.min(30, len), sub: `${Math.min(30, len)} min` };
-    const cards = { main: [...(taskCard ? [taskCard] : []), ...catCards.slice(0, 4), restCard], more: catCards.slice(4) };
-    out.push({ s: start, fs: f.s, e: f.e, len, options, cards, plan: planForGap(start, f.e, pending, evening, planUsed) });
+    const cards = { main: [...catCards.slice(0, MAX_CARDS - 1), restCard], more: catCards.slice(MAX_CARDS - 1) };
+    out.push({ s: start, fs: f.s, e: f.e, len, options, cards, plan: [] });
   }
   return out;
 }
@@ -394,22 +398,55 @@ function tlRow(x, nowMin) {
   const cls = `tl k-${x.kind}${x.done ? ' done-slot' : ''}${x.e <= nowMin ? ' past' : ''}${x.s <= nowMin && nowMin < x.e ? ' now' : ''}`;
   const time = `<time><b>${fmtMin(x.s)}</b><small>${fmtMin(x.e)}</small></time>`;
   const now = x.s <= nowMin && nowMin < x.e ? '<em class="now-tag">ahora</em>' : '';
-  if (x.kind === 'free') return `<li class="${cls}">${time}<div class="tl-body"><span class="tl-free">Libre · ${dur(x.e - x.s)}</span>${now}</div></li>`;
-  if (x.kind === 'plan') return `<li class="${cls}">${time}<div class="tl-body"><input type="checkbox" data-plan="${esc(x.id)}" ${x.done ? 'checked' : ''} aria-label="Hecho"><span class="tl-name">${PLAN_ICON[x.pkind] || '●'} ${esc(x.name)}</span>${now}<button class="icon-btn" data-act="del-plan" data-id="${esc(x.id)}" aria-label="Quitar de mi día">×</button></div></li>`;
+  const attrs = `data-s="${x.s}" data-e="${x.e}" data-k="${x.kind}"`;
+  if (x.kind === 'free') return `<li class="${cls}" ${attrs}>${time}<div class="tl-body"><span class="tl-free">Libre · ${dur(x.e - x.s)}</span>${now}${x.e > nowMin && x.e - Math.max(x.s, nowMin) >= MIN_GAP ? `<button class="icon-btn tl-plus" data-act="sugg-go" data-id="${x.s}" aria-label="Ver ideas para este hueco" title="Ver ideas para este hueco">＋</button>` : ''}</div></li>`;
+  if (x.kind === 'plan') {
+    const pl = byId(data.plan, x.id), real = pl && pl.realMin && pl.realMin !== x.e - x.s ? `<small class="tl-real">${dur(pl.realMin)} reales</small>` : '';
+    const row = `<li class="${cls}${same(ui.editPlan, x.id) ? ' editing' : ''}" ${attrs} data-id="${esc(x.id)}">${time}<div class="tl-body"><span class="tl-grip" title="Arrastra para recolocar" aria-label="Arrastrar para recolocar">⋮⋮</span><input type="checkbox" data-plan="${esc(x.id)}" ${x.done ? 'checked' : ''} aria-label="Hecho"><span class="tl-name">${PLAN_ICON[x.pkind] || '●'} ${esc(x.name)}</span>${real}${now}<button class="icon-btn tl-edit" data-act="edit-plan" data-id="${esc(x.id)}" aria-label="Editar hora y duración">✎</button><button class="icon-btn" data-act="del-plan" data-id="${esc(x.id)}" aria-label="Quitar de mi día">×</button></div></li>`;
+    return row + (same(ui.editPlan, x.id) ? planEditHtml(pl, x) : '');
+  }
   const del = x.kind === 'event' ? `<button class="icon-btn" data-act="del-event" data-id="${esc(x.id)}" aria-label="Eliminar plan">×</button>` : '';
-  return `<li class="${cls}">${time}<div class="tl-body"><span class="tl-name">${x.kind === 'routine' ? '◷' : '▦'} ${esc(x.name)}</span>${now}${del}</div></li>`;
+  return `<li class="${cls}" ${attrs}>${time}<div class="tl-body"><span class="tl-name">${x.kind === 'routine' ? '◷' : '▦'} ${esc(x.name)}</span>${now}${del}</div></li>`;
+}
+function planEditHtml(pl, x) {
+  if (!pl) return '';
+  const planned = x.e - x.s, real = pl.realMin || planned;
+  return `<li class="tl-editor"><form data-form="plan-form" data-id="${esc(pl.id)}" class="plan-form">
+    <label class="fld"><span>Empieza</span><input class="field" name="start" type="time" value="${fmtMin(x.s)}" required></label>
+    <label class="fld"><span>Duración prevista (min)</span><input class="field" name="min" type="number" min="5" max="720" step="5" value="${planned}" required></label>
+    <label class="fld"><span>Tiempo real (min)</span><input class="field" name="real" type="number" min="1" max="720" value="${real}"></label>
+    <div class="form-actions"><button class="primary small">Guardar</button><button type="button" class="text-button" data-act="close-plan-edit">Cerrar</button></div>
+    <small class="muted">«Tiempo real» es lo que de verdad le has dedicado; es el que cuenta en tu Tracker.</small></form></li>`;
+}
+/* ¿Cabe un plan de s a e sin pisar nada más (trabajo, franjas, eventos u otros planes)? */
+function planConflict(ds, id, s, e) {
+  if (s < 0 || e > 1439 || e <= s) return 'Esa hora se sale del día.';
+  const hit = dayInfo(ds).blocks.find(b => !(b.kind === 'plan' && same(b.id, id)) && s < b.e && e > b.s);
+  return hit ? `Se solapa con «${hit.name}» (${fmtMin(hit.s)}–${fmtMin(hit.e)}).` : '';
+}
+function syncPlanLog(pl) {
+  if (pl.kind !== 'hobby') return;
+  data.log = data.log.filter(l => !same(l.planId, pl.id));
+  const a = byId(data.activities, pl.refId);
+  if (pl.done && a) data.log.push({ id: uid(), date: pl.date, activityId: a.id, minutes: pl.realMin || Math.max(5, toMin(pl.end) - toMin(pl.start)), planId: pl.id });
 }
 function catCard(c, g) {
   const lab = c.kind === 'hobby' ? esc(c.cat).toUpperCase() : c.kind === 'task' ? 'TAREA' : 'DESCANSO';
   const swap = c.more ? `<button type="button" class="cc-swap" data-act="cat-swap" data-id="${esc(c.key)}" aria-label="Otra de ${esc(c.cat)}" title="Otra de ${esc(c.cat)}">↻</button>` : '';
   return `<div class="cat-card k-${c.kind}"><button type="button" class="sugg-opt cc-main" data-act="plan-add" data-kind="${c.kind}" data-ref="${esc(c.ref)}" data-start="${g.s}" data-min="${c.min}"><small>${lab}</small><b>${esc(c.title)}</b><span>${esc(c.sub)}</span><em>＋</em></button>${swap}</div>`;
 }
+function catPicker() {
+  const cats = [...new Set(data.activities.map(a => a.stack).filter(Boolean))];
+  if (cats.length < 2) return '';
+  const hid = data.settings.hideCats || [];
+  return `<div class="cat-pick"><button type="button" class="text-button" data-act="cat-pick">${ui.catOpen ? '▾' : '▸'} Elegir categorías${hid.length ? ` (${hid.length} oculta${hid.length > 1 ? 's' : ''})` : ''}</button>
+    ${ui.catOpen ? `<p class="tiny">Marca las que quieres ver. Salen hasta ${MAX_CARDS - 1} a la vista y el resto en «Más categorías».</p><div class="chips">${cats.map(c => `<label class="chip${hid.includes(c) ? '' : ' active'}"><input type="checkbox" data-cat="${esc(c)}" ${hid.includes(c) ? '' : 'checked'} hidden>${esc(c)}</label>`).join('')}</div>` : ''}</div>`;
+}
 function gapHtml(g) {
-  return `<div class="sugg"><div class="sugg-head"><b>${fmtMin(g.s)}–${fmtMin(g.e)}</b><span>${dur(g.len)} libres. ¿Qué te apetece? Toca y se añade a tu día.</span></div>
+  return `<div class="sugg" data-fs="${g.fs}"><div class="sugg-head"><b>${fmtMin(g.s)}–${fmtMin(g.e)}</b><span>${dur(g.len)} libres. Un plan por categoría: toca y se añade a tu día.</span></div>
     <div class="cat-grid">${g.cards.main.map(c => catCard(c, g)).join('')}</div>
     ${g.cards.more.length ? `<details class="sugg-more"${ui.moreOpen === g.fs ? ' open' : ''}><summary>Más categorías (${g.cards.more.length})</summary><div class="cat-grid">${g.cards.more.map(c => catCard(c, g)).join('')}</div></details>` : ''}
-    ${g.plan.length ? `<div class="plan-line"><small class="muted">Con una de cada: ${g.plan.map(i => esc(i.text)).join(' · ')}</small>
-      <div class="form-actions"><button type="button" class="primary small" data-act="plan-add-all" data-start="${g.s}" data-items="${esc(JSON.stringify(g.plan.map(i => ({ kind: i.kind, ref: i.ref, min: i.min }))))}">＋ Montar un plan con una de cada</button><button type="button" class="text-button" data-act="sugg-shuffle" data-id="${g.s}">↻ Otra combinación</button></div></div>` : ''}</div>`;
+    </div>`;
 }
 /* ---------- Inicio guiado (solo la primera vez) ---------- */
 const needsOnboarding = () => !data.settings.onboarded && (!(data.meta && data.meta.updatedAt) || !!ui.onb);
@@ -449,7 +486,7 @@ function renderHome() {
   if (!ui.onb && needsOnboarding()) ui.onb = { step: 0 };
   if (ui.onb) return renderWelcome();
   const d = new Date(), ts = today(), nowMin = d.getHours() * 60 + d.getMinutes();
-  const greeting = { manana: 'Buenos días.', tarde: 'Buenas tardes.', noche: 'Buenas noches.' }[themeNow().phase];
+  const greeting = { manana: 'Buenos días.', tarde: 'Buenas tardes.', noche: 'Buenas noches.' }[phaseOf(d, themeNow().season)];
   const info = dayInfo(ts);
   const planned = new Set(data.plan.filter(p => p.date === ts && p.kind === 'task').map(p => String(p.refId)));
   const todays = data.tasks.filter(t => t.date === ts && !planned.has(String(t.id)));
@@ -462,11 +499,6 @@ function renderHome() {
   $('#app').innerHTML = `
     <section class="welcome compact"><div><p class="eyebrow">${esc(d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase())}</p><h1>${greeting}</h1><p class="muted">${esc(themeLine())}</p></div>
       <button type="button" class="star-chip" data-act="go" data-id="sky" aria-label="Mi cielo: ${total} estrellas">✦ <b>${total}</b></button></section>
-    <section class="panel now-panel">
-      <p class="eyebrow">${first ? 'TU PRÓXIMO PLAN' : 'HOY'}</p><h2>${first ? nowTitle : 'Sin huecos por hoy'}</h2>
-      ${heavy ? `<p class="note">Hoy tienes ${dur(work)} de trabajo, así que no te propongo tareas de trabajo, salvo las de prioridad alta.</p>` : ''}
-      ${first ? gapHtml(first) + (rest.length ? `<details class="sugg-more other-gaps"><summary>Otros huecos de hoy (${rest.length})</summary>${rest.map(gapHtml).join('')}</details>` : '') : '<div class="empty">Hoy no te quedan huecos libres. Disfruta lo que tienes en la agenda.</div>'}
-    </section>
     <section class="panel">
       <div class="section-head"><div><p class="eyebrow">AGENDA</p><h2>Tu día</h2></div><button class="text-button" data-act="go" data-id="calendar">Ver semana →</button></div>
       ${info.allDay.map(ev => `<div class="slot allday"><b>Todo el día</b><span>${esc(ev.name)}</span></div>`).join('')}
@@ -474,7 +506,12 @@ function renderHome() {
     </section>
     <section class="panel">
       <div class="section-head"><div><p class="eyebrow">HOY</p><h2>Tareas de hoy</h2></div><button class="text-button" data-act="go" data-id="tasks">${pendingAll} pendientes en total →</button></div>
-      ${todays.length ? todays.map(t => taskRow(t)).join('') : '<div class="empty">Nada marcado para hoy. Puedes elegir una tarea en tu próximo plan.</div>'}
+      ${todays.length ? todays.map(t => taskRow(t)).join('') : '<div class="empty">Nada marcado para hoy.</div>'}
+    </section>
+    <section class="panel now-panel">
+      <p class="eyebrow">${first ? 'TU PRÓXIMO PLAN' : 'HOY'}</p><h2>${first ? nowTitle : 'Sin huecos por hoy'}</h2>
+      ${heavy ? `<p class="note">Hoy tienes ${dur(work)} de trabajo, así que no te propongo tareas de trabajo, salvo las de prioridad alta.</p>` : ''}
+      ${first ? catPicker() + gapHtml(first) + (rest.length ? `<details class="sugg-more other-gaps"><summary>Otros huecos de hoy (${rest.length})</summary>${rest.map(gapHtml).join('')}</details>` : '') : '<div class="empty">Hoy no te quedan huecos libres. Disfruta lo que tienes en la agenda.</div>'}
     </section>
     ${recapCard()}
     ${showSignin() ? `<section class="panel suggestion signin-card">
@@ -1137,6 +1174,14 @@ const actions = {
     }
     save(); render();
   },
+  'cat-pick': () => { ui.catOpen = !ui.catOpen; render(); },
+  'sugg-go': id => {
+    const el = $(`.sugg[data-fs="${id}"]`) || $('.now-panel'); if (!el) return;
+    const d = el.closest('details'); if (d) d.open = true;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  },
+  'edit-plan': id => { ui.editPlan = same(ui.editPlan, id) ? null : id; render(); },
+  'close-plan-edit': () => { ui.editPlan = null; render(); },
   'cat-swap': (id, b) => { ui.shuffle[id] = (ui.shuffle[id] || 0) + 1; ui.moreOpen = b && b.closest('details') ? +String(id).split('|')[0] : null; render(); },
   'sugg-shuffle': id => { ui.shuffle[id] = (ui.shuffle[id] || 0) + 1; render(); },
   'del-log': id => { data.log = data.log.filter(l => !same(l.id, id)); save(); render(); },
@@ -1151,6 +1196,7 @@ const actions = {
   'del-plan': id => {
     data.plan = data.plan.filter(p => !same(p.id, id));
     data.log = data.log.filter(l => !same(l.planId, id));
+    if (same(ui.editPlan, id)) ui.editPlan = null;
     save(); render();
   },
   'clear-ics': () => {
@@ -1232,6 +1278,15 @@ const forms = {
     if (edit) Object.assign(edit, r); else data.routines.push({ id: uid(), ...r });
     ui.editRoutine = null; save(); render();
   },
+  'plan-form': f => {
+    const pl = byId(data.plan, f.dataset.id); if (!pl) return;
+    const st = toMin(f.start.value), m = Math.max(5, Math.min(720, +f.min.value || 30)), bad = planConflict(pl.date, pl.id, st, st + m);
+    if (bad) { alert(bad); return; }
+    const real = Math.max(1, Math.min(720, Math.round(+f.real.value) || m));
+    pl.start = fmtMin(st); pl.end = fmtMin(st + m);
+    if (real === m) delete pl.realMin; else pl.realMin = real;
+    syncPlanLog(pl); ui.editPlan = null; save(); render();
+  },
   'settings-form': f => {
     if (toMin(f.dayEnd.value) <= toMin(f.dayStart.value)) { alert('El final de la jornada debe ser posterior al inicio.'); return; }
     Object.assign(data.settings, { dayStart: f.dayStart.value, dayEnd: f.dayEnd.value, workLimit: Math.max(1, Math.min(16, +f.workLimit.value || 6)) });
@@ -1260,14 +1315,16 @@ app.addEventListener('change', async e => {
       const r = t.getBoundingClientRect(), n0 = skyList().length;
       pl.done = t.checked;
       if (pl.kind === 'task') { const tk = byId(data.tasks, pl.refId); if (tk) { tk.done = t.checked; tk.doneAt = t.checked ? pl.date : ''; } }
-      if (pl.kind === 'hobby') { // hacerlo en tu día cuenta como sesión en el tracker
-        data.log = data.log.filter(l => !same(l.planId, pl.id));
-        const a = byId(data.activities, pl.refId);
-        if (t.checked && a) data.log.push({ id: uid(), date: pl.date, activityId: a.id, minutes: Math.max(5, toMin(pl.end) - toMin(pl.start)), planId: pl.id });
-      }
+      syncPlanLog(pl); // hacerlo en tu día cuenta como sesión en el tracker (con el tiempo real si lo indicas)
+      if (t.checked && pl.kind !== 'custom' && pl.date === today()) ui.editPlan = pl.id; // para ajustar cuánto tiempo le has dedicado
+      else if (!t.checked && same(ui.editPlan, pl.id)) ui.editPlan = null;
       save(); render();
       if (t.checked && pl.kind !== 'custom') cheer(pl.kind, r, skyList().length > n0);
     }
+  } else if (t.dataset.cat !== undefined) {
+    const h = new Set(data.settings.hideCats || []);
+    t.checked ? h.delete(t.dataset.cat) : h.add(t.dataset.cat);
+    data.settings.hideCats = [...h]; save(); render();
   } else if (t.dataset.logdate !== undefined) {
     const l = byId(data.log, t.dataset.logdate);
     if (l && t.value && t.value <= today()) { l.date = t.value; save(); }
@@ -1301,6 +1358,10 @@ $$('.nav').forEach(b => b.onclick = () => {
 const moreSheet = $('#more-sheet');
 if (moreSheet) moreSheet.addEventListener('click', e => { if (e.target === moreSheet) moreSheet.hidden = true; });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && moreSheet) moreSheet.hidden = true; });
+$('#mode-toggle').addEventListener('click', () => {
+  data.settings.mode = themeNow().phase === 'noche' ? 'light' : 'dark';
+  save(); applyTheme(); render();
+});
 $('.brand').addEventListener('click', e => { e.preventDefault(); page('today'); });
 $('#top-account').addEventListener('click', () => {
   const S = window.LifeSync && window.LifeSync.state;
@@ -1315,3 +1376,46 @@ setInterval(applyTheme, 10 * 60 * 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) applyTheme(); });
 
 if ('serviceWorker' in navigator) { window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {})); }
+
+/* ---------- Arrastrar planes en Mi día ---------- */
+(function dragPlans() {
+  let d = null;
+  const clear = () => $$('.tl.drop-up,.tl.drop-down').forEach(n => n.classList.remove('drop-up', 'drop-down'));
+  app.addEventListener('pointerdown', e => {
+    const g = e.target.closest('.tl-grip'); if (!g) return;
+    const li = g.closest('li.tl'); if (!li) return;
+    e.preventDefault();
+    d = { li, g, y0: e.clientY, id: li.dataset.id, s: +li.dataset.s, e: +li.dataset.e, id_p: e.pointerId, target: null, up: false, moved: false };
+    try { g.setPointerCapture(e.pointerId); } catch {}
+  });
+  app.addEventListener('pointermove', e => {
+    if (!d || e.pointerId !== d.id_p) return;
+    const dy = e.clientY - d.y0;
+    if (!d.moved && Math.abs(dy) < 6) return;
+    if (!d.moved) { d.moved = true; d.li.classList.add('dragging'); d.li.style.pointerEvents = 'none'; }
+    d.li.style.transform = `translateY(${dy}px)`;
+    clear(); d.target = null;
+    const el = document.elementFromPoint(e.clientX, e.clientY), t = el && el.closest && el.closest('li.tl[data-s]');
+    if (t && t !== d.li) {
+      const r = t.getBoundingClientRect(); d.up = e.clientY < r.top + r.height / 2;
+      d.target = t; t.classList.add(d.up ? 'drop-up' : 'drop-down');
+    }
+  });
+  const finish = e => {
+    if (!d || e.pointerId !== d.id_p) return;
+    const cur = d; d = null; clear();
+    cur.li.style.transform = ''; cur.li.style.pointerEvents = ''; cur.li.classList.remove('dragging');
+    try { cur.g.releasePointerCapture(e.pointerId); } catch {}
+    if (!cur.moved || e.type === 'pointercancel' || !cur.target) return;
+    const pl = byId(data.plan, cur.id); if (!pl) return;
+    const T = cur.target, ts = +T.dataset.s, te = +T.dataset.e, len = cur.e - cur.s, free = T.dataset.k === 'free';
+    let st = cur.up ? (free ? ts : ts - len) : (free ? te - len : te);
+    st = Math.round(st / 5) * 5;
+    const bad = planConflict(pl.date, pl.id, st, st + len);
+    if (bad) { toast(bad); return; }
+    pl.start = fmtMin(st); pl.end = fmtMin(st + len);
+    save(); render();
+  };
+  app.addEventListener('pointerup', finish);
+  app.addEventListener('pointercancel', finish);
+})();
