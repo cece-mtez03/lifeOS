@@ -84,7 +84,7 @@ function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;
 const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const WORK_RE = /trabaj|work|curro|oficina|empresa/i;
 const isWorkSpace = sp => !!sp && (sp.work !== undefined ? !!sp.work : WORK_RE.test(sp.name || ''));
-const isWorkRoutine = r => r.work !== undefined ? !!r.work : WORK_RE.test(r.name || '');
+const isWorkRoutine = r => !r.off && (r.work !== undefined ? !!r.work : WORK_RE.test(r.name || ''));
 function workMinutes(ds) {
   const dow = parseYmd(ds).getDay();
   return data.routines.filter(r => r.days.includes(dow) && isWorkRoutine(r)).reduce((t, r) => t + Math.max(0, toMin(r.end) - toMin(r.start)), 0);
@@ -198,7 +198,7 @@ function applyTheme() {
 }
 
 /* ---------- Estado de interfaz ---------- */
-const ui = { editRoutine: null, view: 'today', dumpNote: '', editTask: null, calSettings: false, editActivity: null, weekOffset: 0, shuffle: {}, taskView: 'spaces', onb: null };
+const ui = { editRoutine: null, view: 'today', dumpNote: '', editTask: null, calSettings: false, editActivity: null, weekOffset: 0, shuffle: {}, taskView: 'spaces', onb: null, moreOpen: null };
 
 function page(view) {
   ui.view = view;
@@ -217,7 +217,7 @@ function dayInfo(ds) {
   const dow = parseYmd(ds).getDay();
   const blocks = [], allDay = [];
   data.routines.forEach(r => {
-    if (r.days.includes(dow)) blocks.push({ s: toMin(r.start), e: toMin(r.end), name: r.name, kind: 'routine', id: r.id });
+    if (r.days.includes(dow)) blocks.push({ s: toMin(r.start), e: toMin(r.end), name: r.name, kind: r.off ? 'off' : 'routine', id: r.id });
   });
   data.events.forEach(ev => {
     if (ev.date !== ds) return;
@@ -239,7 +239,7 @@ function dayInfo(ds) {
   }
   if (we - cursor >= MIN_GAP) free.push({ s: cursor, e: we });
   const freeClean = free.filter(f => f.e - f.s >= MIN_GAP);
-  const slots = [...blocks, ...freeClean.map(f => ({ ...f, kind: 'free' }))].sort((a, b) => a.s - b.s || (a.kind === 'free') - (b.kind === 'free'));
+  const slots = [...blocks.filter(b => b.kind !== 'off'), ...freeClean.map(f => ({ ...f, kind: 'free' }))].sort((a, b) => a.s - b.s || (a.kind === 'free') - (b.kind === 'free'));
   return { slots, allDay, freeTotal: freeClean.reduce((t, f) => t + f.e - f.s, 0) };
 }
 function slotHtml(x) {
@@ -303,24 +303,37 @@ function suggestionsForToday(info, nowMin) {
     const len = f.e - start;
     if (len < MIN_GAP) continue;
     const options = [];
-    const task = pending.find(t => !usedTasks.has(t.id) && (!minOf(t) || minOf(t) <= len));
+    const evening0 = start >= 20 * 60;
+    const fitC = data.activities.filter(a => a.minutes <= len && !plannedActs.has(String(a.id)) && (!evening0 || a.energy === 'Baja'));
+    const rankedC = rankActs(fitC, ts + '|' + f.s), cats = [];
+    rankedC.forEach(a => { if (!cats.includes(a.stack)) cats.push(a.stack); });
+    const catCards = cats.map(cat => {
+      const list = rankedC.filter(a => a.stack === cat), key = f.s + '|' + cat, a = list[(ui.shuffle[key] || 0) % list.length];
+      const g = goalOf(a), wk = weekCount(a.id);
+      return { kind: 'hobby', ref: a.id, cat, key, more: list.length > 1, title: a.name, min: a.minutes, sub: `${a.minutes} min${g && wk < g ? ' · ' + wk + '/' + g + ' esta semana' : ''}` };
+    });
+    const task = pending.find(t => !usedTasks.has(String(t.id)) && (!minOf(t) || minOf(t) <= len));
     if (task) {
-      usedTasks.add(task.id);
+      usedTasks.add(String(task.id));
       const sp = byId(data.spaces, task.spaceId);
       const late = task.date && task.date < ts ? ' (atrasada)' : task.date === ts ? ' (para hoy)' : '';
       options.push({ icon: '☷', kind: 'task', ref: task.id, min: Math.min(minOf(task) || 45, len),
         text: `Avanzar con «${esc(task.name)}»${sp ? ' · ' + esc(sp.name) : ''}${minOf(task) ? ' · ⏱ ' + dur(minOf(task)) : ''}${prioOf(task) === 'Alta' ? ' · prioridad alta' : ''}${late}` });
     }
     const evening = start >= 20 * 60;
-    const fit = data.activities.filter(a => a.minutes <= len && !usedActs.has(a.id) && (!evening || a.energy === 'Baja'));
+    const fit = data.activities.filter(a => a.minutes <= len && !usedActs.has(String(a.id)) && (!evening || a.energy === 'Baja'));
     for (const a of pickAlternatives(fit, ts + '|' + f.s, 2)) {
-      usedActs.add(a.id);
+      usedActs.add(String(a.id));
       const g = goalOf(a), wk = weekCount(a.id);
       options.push({ icon: '✧', kind: 'hobby', ref: a.id, min: a.minutes,
         text: `${esc(a.name)} <small>(${a.minutes} min · ${esc(a.stack)}${g && wk < g ? ` · ${wk}/${g} esta semana` : ''})</small>` });
     }
     options.push({ icon: '☾', kind: 'rest', ref: '', min: Math.min(30, len), text: len >= 90 ? 'Descansar un rato, un paseo o no hacer nada' : 'Descansar un rato' });
-    out.push({ s: start, e: f.e, len, options, plan: planForGap(start, f.e, pending, evening, planUsed) });
+    const taskCard = task ? { kind: 'task', ref: task.id, cat: 'Tarea', title: task.name, min: Math.min(minOf(task) || 45, len),
+      sub: `${minOf(task) ? '⏱ ' + dur(minOf(task)) : 'sin estimar'}${prioOf(task) === 'Alta' ? ' · prioridad alta' : ''}${task.date && task.date < ts ? ' · atrasada' : task.date === ts ? ' · para hoy' : ''}` } : null;
+    const restCard = { kind: 'rest', ref: '', cat: 'Descanso', title: len >= 90 ? 'Descansar o pasear' : 'Descansar un rato', min: Math.min(30, len), sub: `${Math.min(30, len)} min` };
+    const cards = { main: [...(taskCard ? [taskCard] : []), ...catCards.slice(0, 4), restCard], more: catCards.slice(4) };
+    out.push({ s: start, fs: f.s, e: f.e, len, options, cards, plan: planForGap(start, f.e, pending, evening, planUsed) });
   }
   return out;
 }
@@ -328,14 +341,14 @@ function suggestionsForToday(info, nowMin) {
 function planForGap(start, end, pending, evening, used) {
   const len = end - start, n = ui.shuffle[start] || 0, seed = today() + '|' + start + '|' + n;
   const items = []; let left = len;
-  const cands = pending.filter(t => !used.tasks.has(t.id) && (!minOf(t) || minOf(t) <= len));
+  const cands = pending.filter(t => !used.tasks.has(String(t.id)) && (!minOf(t) || minOf(t) <= len));
   if (cands.length) {
     const t = cands[n % cands.length], m = Math.min(minOf(t) || 45, len);
-    used.tasks.add(t.id); items.push({ kind: 'task', ref: t.id, min: m, text: t.name, icon: '☷' }); left -= m;
+    used.tasks.add(String(t.id)); items.push({ kind: 'task', ref: t.id, min: m, text: t.name, icon: '☷' }); left -= m;
   }
-  const fit = data.activities.filter(a => !used.acts.has(a.id) && (!evening || a.energy === 'Baja'));
+  const fit = data.activities.filter(a => !used.acts.has(String(a.id)) && (!evening || a.energy === 'Baja'));
   const mix = pickMix(fit, Math.max(0, left - (left >= 60 ? 15 : 0)), seed);
-  for (const a of mix.slice(0, 3)) { used.acts.add(a.id); items.push({ kind: 'hobby', ref: a.id, min: a.minutes, text: a.name, icon: '✧', cat: a.stack }); left -= a.minutes; }
+  for (const a of mix.slice(0, 3)) { used.acts.add(String(a.id)); items.push({ kind: 'hobby', ref: a.id, min: a.minutes, text: a.name, icon: '✧', cat: a.stack }); left -= a.minutes; }
   if (left >= 15 && items.length) { const m = Math.min(20, left); items.push({ kind: 'rest', ref: '', min: m, text: 'Descansar un rato', icon: '☾' }); left -= m; }
   let t = start; items.forEach(i => { i.s = t; t += i.min; });
   return items;
@@ -386,11 +399,17 @@ function tlRow(x, nowMin) {
   const del = x.kind === 'event' ? `<button class="icon-btn" data-act="del-event" data-id="${esc(x.id)}" aria-label="Eliminar plan">×</button>` : '';
   return `<li class="${cls}">${time}<div class="tl-body"><span class="tl-name">${x.kind === 'routine' ? '◷' : '▦'} ${esc(x.name)}</span>${now}${del}</div></li>`;
 }
+function catCard(c, g) {
+  const lab = c.kind === 'hobby' ? esc(c.cat).toUpperCase() : c.kind === 'task' ? 'TAREA' : 'DESCANSO';
+  const swap = c.more ? `<button type="button" class="cc-swap" data-act="cat-swap" data-id="${esc(c.key)}" aria-label="Otra de ${esc(c.cat)}" title="Otra de ${esc(c.cat)}">↻</button>` : '';
+  return `<div class="cat-card k-${c.kind}"><button type="button" class="sugg-opt cc-main" data-act="plan-add" data-kind="${c.kind}" data-ref="${esc(c.ref)}" data-start="${g.s}" data-min="${c.min}"><small>${lab}</small><b>${esc(c.title)}</b><span>${esc(c.sub)}</span><em>＋</em></button>${swap}</div>`;
+}
 function gapHtml(g) {
-  return `<div class="sugg"><div class="sugg-head"><b>${fmtMin(g.s)}–${fmtMin(g.e)}</b><span>${dur(g.len)} libres. Te propongo este plan:</span></div>
-    ${g.plan.length ? `<ul class="plan-list">${g.plan.map(i => `<li><i>${i.icon}</i> <b>${esc(i.text)}</b> <small>${fmtMin(i.s)} · ${i.min} min${i.cat ? ' · ' + esc(i.cat) : ''}</small></li>`).join('')}</ul>
-    <div class="form-actions"><button type="button" class="primary small" data-act="plan-add-all" data-start="${g.s}" data-items="${esc(JSON.stringify(g.plan.map(i => ({ kind: i.kind, ref: i.ref, min: i.min }))))}">＋ Añadir este plan a mi día</button><button type="button" class="text-button" data-act="sugg-shuffle" data-id="${g.s}">↻ Otra combinación</button></div>` : ''}
-    <details class="sugg-more"><summary>Prefiero elegir cosas sueltas</summary><ul>${g.options.map(o => `<li><button type="button" class="sugg-opt" data-act="plan-add" data-kind="${o.kind}" data-ref="${esc(o.ref)}" data-start="${g.s}" data-min="${o.min}"><i>${o.icon}</i><span>${o.text}</span><em>＋</em></button></li>`).join('')}</ul></details></div>`;
+  return `<div class="sugg"><div class="sugg-head"><b>${fmtMin(g.s)}–${fmtMin(g.e)}</b><span>${dur(g.len)} libres. ¿Qué te apetece? Toca y se añade a tu día.</span></div>
+    <div class="cat-grid">${g.cards.main.map(c => catCard(c, g)).join('')}</div>
+    ${g.cards.more.length ? `<details class="sugg-more"${ui.moreOpen === g.fs ? ' open' : ''}><summary>Más categorías (${g.cards.more.length})</summary><div class="cat-grid">${g.cards.more.map(c => catCard(c, g)).join('')}</div></details>` : ''}
+    ${g.plan.length ? `<div class="plan-line"><small class="muted">Con una de cada: ${g.plan.map(i => esc(i.text)).join(' · ')}</small>
+      <div class="form-actions"><button type="button" class="primary small" data-act="plan-add-all" data-start="${g.s}" data-items="${esc(JSON.stringify(g.plan.map(i => ({ kind: i.kind, ref: i.ref, min: i.min }))))}">＋ Montar un plan con una de cada</button><button type="button" class="text-button" data-act="sugg-shuffle" data-id="${g.s}">↻ Otra combinación</button></div></div>` : ''}</div>`;
 }
 /* ---------- Inicio guiado (solo la primera vez) ---------- */
 const needsOnboarding = () => !data.settings.onboarded && (!(data.meta && data.meta.updatedAt) || !!ui.onb);
@@ -537,7 +556,7 @@ function renderCalendar() {
   const upcoming = [...data.events.filter(e => e.date >= ts), ...data.plan.filter(p => p.kind === 'custom' && p.date >= ts).map(p => ({ id: p.id, name: p.text, date: p.date, time: p.start, end: p.end, isPlan: true }))].sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || ''))).slice(0, 12);
   const importedCount = data.events.filter(e => e.src === 'ics').length;
   const er = byId(data.routines, ui.editRoutine);
-  const rv = er || { name: '', start: '09:00', end: '17:00', days: [1, 2, 3, 4, 5], work: true };
+  const rv = er || { name: '', start: '09:00', end: '17:00', days: [1, 2, 3, 4, 5], work: true, off: false };
   $('#app').innerHTML = head('Mi calendario', 'Tu semana de un vistazo, con los huecos que te quedan libres.') + `
     <section class="panel">
       <div class="section-head"><div><p class="eyebrow">SEMANA</p><h2>${esc(range)}</h2></div>
@@ -556,8 +575,8 @@ function renderCalendar() {
     ${ui.calSettings ? `
     <section class="panel" id="routine-form-wrap">
       <p class="eyebrow">HORARIO FIJO</p><h2>Trabajo, clases y rutinas</h2>
-      <p class="muted">Lo que se repite cada semana. Se bloquea solo en los días que elijas. Pulsa ✎ para cambiar uno.</p>
-      ${data.routines.map(r => `<div class="item${er && same(er.id, r.id) ? ' editing-row' : ''}"><span><b>${esc(r.name)}</b>${isWorkRoutine(r) ? ' <span class="tiny">· trabajo</span>' : ''}</span><small>${WEEK_ORDER.filter(d => r.days.includes(d)).map(d => DAY_SHORT[d]).join(' ')} · ${esc(r.start)}–${esc(r.end)}</small><button class="icon-btn" data-act="edit-routine" data-id="${esc(r.id)}" aria-label="Editar horario">✎</button><button class="icon-btn" data-act="del-routine" data-id="${esc(r.id)}" aria-label="Eliminar horario">×</button></div>`).join('') || '<p class="empty">Aún no has añadido ningún horario fijo.</p>'}
+      <p class="muted">Lo que se repite cada semana. Se bloquea solo en los días que elijas. Pulsa ✎ para cambiar uno. Si marcas «no existe para mí», esa franja (por ejemplo la comida, de 14:00 a 15:00 todos los días) desaparece de tu día.</p>
+      ${data.routines.map(r => `<div class="item${er && same(er.id, r.id) ? ' editing-row' : ''}"><span><b>${esc(r.name)}</b>${r.off ? ' <span class="tiny">· no cuenta</span>' : isWorkRoutine(r) ? ' <span class="tiny">· trabajo</span>' : ''}</span><small>${WEEK_ORDER.filter(d => r.days.includes(d)).map(d => DAY_SHORT[d]).join(' ')} · ${esc(r.start)}–${esc(r.end)}</small><button class="icon-btn" data-act="edit-routine" data-id="${esc(r.id)}" aria-label="Editar horario">✎</button><button class="icon-btn" data-act="del-routine" data-id="${esc(r.id)}" aria-label="Eliminar horario">×</button></div>`).join('') || '<p class="empty">Aún no has añadido ningún horario fijo.</p>'}
       <h3 class="sub-title">${er ? 'Editar «' + esc(er.name) + '»' : 'Añadir un horario fijo'}</h3>
       <form id="routine-form" class="form-grid">
         <label class="fld span2"><span>Nombre</span><input class="field" name="name" placeholder="Ej. Trabajo" value="${esc(rv.name)}" required></label>
@@ -565,6 +584,7 @@ function renderCalendar() {
         <label class="fld"><span>Hasta</span><input class="field" name="end" type="time" value="${esc(rv.end)}" required></label>
         <div class="fld span2"><span>Días</span><div class="days">${WEEK_ORDER.map(d => `<label><input type="checkbox" name="day" value="${d}"${rv.days.includes(d) ? ' checked' : ''}><span>${DAY_SHORT[d]}</span></label>`).join('')}</div></div>
         <label class="check span2"><input type="checkbox" name="work"${isWorkRoutine(rv) ? ' checked' : ''}> Cuenta como trabajo (los días largos no te sugeriré más tareas de trabajo, salvo las prioritarias)</label>
+        <label class="check span2"><input type="checkbox" name="off"${rv.off ? ' checked' : ''}> Esta franja no existe para mí (comida, siesta…): no la muestro, no es tiempo libre y no te propongo nada en ella</label>
         <div class="form-actions span2"><button class="primary">${er ? 'Guardar cambios' : 'Añadir horario'}</button>${er ? '<button type="button" class="text-button" data-act="cancel-routine-edit">Cancelar</button>' : ''}</div>
       </form>
     </section>
@@ -1117,6 +1137,7 @@ const actions = {
     }
     save(); render();
   },
+  'cat-swap': (id, b) => { ui.shuffle[id] = (ui.shuffle[id] || 0) + 1; ui.moreOpen = b && b.closest('details') ? +String(id).split('|')[0] : null; render(); },
   'sugg-shuffle': id => { ui.shuffle[id] = (ui.shuffle[id] || 0) + 1; render(); },
   'del-log': id => { data.log = data.log.filter(l => !same(l.id, id)); save(); render(); },
   'plan-add': (id, b) => {
@@ -1206,7 +1227,7 @@ const forms = {
     const days = [...f.querySelectorAll('input[name=day]:checked')].map(c => +c.value);
     if (!days.length) { alert('Elige al menos un día.'); return; }
     if (toMin(f.end.value) <= toMin(f.start.value)) { alert('La hora de fin debe ser posterior a la de inicio.'); return; }
-    const r = { name: f.name.value.trim(), days, start: f.start.value, end: f.end.value, work: !!f.work.checked };
+    const off = !!f.off.checked, r = { name: f.name.value.trim(), days, start: f.start.value, end: f.end.value, work: off ? false : !!f.work.checked, off };
     const edit = byId(data.routines, ui.editRoutine);
     if (edit) Object.assign(edit, r); else data.routines.push({ id: uid(), ...r });
     ui.editRoutine = null; save(); render();
