@@ -322,3 +322,25 @@ body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .sidebar nav:first-child{margin-top:6px}
 .tabbar .nav{min-width:0}
 @media(max-width:760px){.hobby-groups{grid-template-columns:1fr}}
+
+/* v21: categorías en filas con color, 3 columnas de ideas, tareas a la agenda */
+.hobby-groups{display:grid;grid-template-columns:1fr;gap:16px;align-items:start}
+.hobby-group{background:color-mix(in srgb,var(--cc,var(--accent)) 11%,var(--paper));border:1px solid color-mix(in srgb,var(--cc,var(--accent)) 38%,var(--line));border-left:6px solid var(--cc,var(--accent));padding:14px 16px 18px}
+.hobby-group .stack-head h3{flex:0 1 auto}
+.hobby-group .stack-head{gap:10px}
+.hobby-group .stack-head .text-button:first-of-type{margin-left:auto}
+.hobby-group .stack-col{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.hobby-group .stack-col>.empty{grid-column:1/-1;margin:0}
+.hobby-group .stack-card{background:var(--paper)}
+.grip.off{display:none}
+.cat-color{position:relative;display:inline-flex;width:22px;height:22px;flex:none;cursor:pointer}
+.cat-color input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:0;padding:0}
+.cat-color span{width:22px;height:22px;border-radius:50%;border:2px solid var(--paper);box-shadow:0 0 0 1px var(--line2)}
+.cat-color:focus-within span{box-shadow:0 0 0 2px var(--accent)}
+.cat-card .cc-main{border-left:4px solid var(--cc,var(--accent))!important}
+.cat-card.k-rest .cc-main{border-left-color:var(--cc,#7fb6e6)!important}
+.cat-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(max-width:520px){.cat-grid{grid-template-columns:1fr 1fr}.hobby-group .stack-col{grid-template-columns:1fr}}
+.tp-btn{font-size:12px;padding:2px 6px;white-space:nowrap}
+.tp-form{display:block;border-top:0;padding-top:0}
+.tp-form .plan-form{margin:0}

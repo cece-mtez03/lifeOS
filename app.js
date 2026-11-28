@@ -39,7 +39,7 @@ function normalize(raw) {
   });
   d.sky = Object.assign({ best: {}, seen: 0 }, d.sky && typeof d.sky === 'object' ? d.sky : {});
   if (!d.sky.best || typeof d.sky.best !== 'object') d.sky.best = {};
-  d.settings = Object.assign({ dayStart: '08:00', dayEnd: '22:00', season: 'auto', phase: 'auto', workLimit: 6, mode: 'auto', hideCats: [], catCustom: false, catOrder: [], spaceCustom: false, spaceOrder: [] }, d.settings);
+  d.settings = Object.assign({ dayStart: '08:00', dayEnd: '22:00', season: 'auto', phase: 'auto', workLimit: 6, mode: 'auto', hideCats: [], catCustom: false, catOrder: [], catColors: {}, spaceCustom: false, spaceOrder: [] }, d.settings);
   return d;
 }
 let data;
@@ -202,7 +202,7 @@ function applyTheme() {
 }
 
 /* ---------- Estado de interfaz ---------- */
-const ui = { editRoutine: null, view: 'today', dumpNote: '', editTask: null, editActivity: null, weekOffset: 0, shuffle: {}, taskView: 'spaces', onb: null, moreOpen: null, catOpen: false, editPlan: null, newStack: null, slot: null, calEdit: null };
+const ui = { editRoutine: null, view: 'today', dumpNote: '', editTask: null, editActivity: null, weekOffset: 0, shuffle: {}, taskView: 'spaces', onb: null, taskPlan: null, moreOpen: null, catOpen: false, editPlan: null, newStack: null, slot: null, calEdit: null };
 
 function page(view) {
   ui.view = view; ui.newStack = null;
@@ -280,6 +280,17 @@ function taskEditForm(t) {
     <div class="card-actions"><button class="primary">Guardar</button><button type="button" class="text-button" data-act="cancel-task-edit">Cancelar</button></div>
   </form></div>`;
 }
+function taskPlanForm(t) {
+  const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes(), len = minOf(t) || 45;
+  const gap = dayInfo(today()).slots.find(x => x.kind === 'free' && x.e - Math.max(x.s, nowMin) >= Math.min(len, MIN_GAP));
+  const st = gap ? Math.ceil(Math.max(gap.s, nowMin) / 5) * 5 : 17 * 60, en = Math.min(gap ? gap.e : 1439, st + len);
+  return `<div class="item tp-form"><form data-form="task-plan-form" data-id="${esc(t.id)}" class="plan-form">
+    <label class="fld"><span>Día</span><input class="field" name="date" type="date" value="${today()}" required></label>
+    <label class="fld"><span>Desde</span><input class="field" name="start" type="time" value="${fmtMin(st)}" required></label>
+    <label class="fld"><span>Hasta</span><input class="field" name="end" type="time" value="${fmtMin(Math.max(en, st + 5))}" required></label>
+    <div class="form-actions"><button class="primary small">Ponerla en mi agenda</button><button type="button" class="text-button" data-act="task-plan-close">Cancelar</button></div>
+    <small class="muted">«${esc(t.name)}»: aparecerá en tu agenda y en tu calendario a esa hora.</small></form></div>`;
+}
 function taskRow(t, showSpace = true) {
   if (ui.view === 'tasks' && same(ui.editTask, t.id)) return taskEditForm(t);
   const sp = byId(data.spaces, t.spaceId);
@@ -289,17 +300,28 @@ function taskRow(t, showSpace = true) {
     + (t.date ? `<span class="meta-t">${fmtDate(t.date)}</span>` : '');
   return `<div class="item task-item"><input type="checkbox" data-task="${esc(t.id)}" ${t.done ? 'checked' : ''} aria-label="Hecha">
     <div class="task-main"><span class="${t.done ? 'done' : ''}">${esc(t.name)}</span><div class="meta">${meta}</div></div>
+    ${!t.done && (ui.view === 'today' || ui.view === 'tasks') ? `<button class="text-button tp-btn" data-act="task-plan" data-id="${esc(t.id)}" aria-label="Ponerla en mi agenda" title="Ponerla en mi agenda">▦ Agenda</button>` : ''}
     ${ui.view === 'tasks' ? `<button class="icon-btn" data-act="edit-task" data-id="${esc(t.id)}" aria-label="Editar tarea">✎</button>` : ''}
-    <button class="icon-btn" data-act="del-task" data-id="${esc(t.id)}" aria-label="Eliminar tarea">×</button></div>`;
+    <button class="icon-btn" data-act="del-task" data-id="${esc(t.id)}" aria-label="Eliminar tarea">×</button></div>${same(ui.taskPlan, t.id) ? taskPlanForm(t) : ''}`;
 }
 const MAX_CARDS = 6; // tarjetas a la vista por hueco (descanso incluido)
 const REST_CAT = 'Descanso'; // categoría predeterminada: lo que metas aquí cuenta como descanso
 const byAZ = (a, b) => String(a).localeCompare(String(b), 'es', { sensitivity: 'base' });
 function orderedCats() { // alfabético por defecto; si las has ordenado tú, tu orden
-  const names = [...new Set([...data.activities.map(a => a.stack).filter(Boolean), REST_CAT])].sort(byAZ);
-  if (!data.settings.catCustom) return names;
-  const ord = data.settings.catOrder || [], ix = n => { const i = ord.indexOf(n); return i < 0 ? 1e6 : i; };
-  return names.sort((a, b) => ix(a) - ix(b) || byAZ(a, b));
+  const names = [...new Set(data.activities.map(a => a.stack).filter(x => x && x !== REST_CAT))].sort(byAZ);
+  if (data.settings.catCustom) {
+    const ord = data.settings.catOrder || [], ix = n => { const i = ord.indexOf(n); return i < 0 ? 1e6 : i; };
+    names.sort((a, b) => ix(a) - ix(b) || byAZ(a, b));
+  }
+  return [...names, REST_CAT]; // Descanso siempre es el último bloque
+}
+const CAT_COLORS = ['#e8b64a', '#d98a8a', '#8fb996', '#7fb6e6', '#c58ad8', '#e6a06a', '#6fb7b0', '#b3a58f'];
+function catColor(cat) {
+  const c = (data.settings.catColors || {})[cat];
+  if (/^#[0-9a-f]{6}$/i.test(c || '')) return c;
+  if (cat === REST_CAT) return '#7fb6e6';
+  const i = orderedCats().filter(x => x !== REST_CAT).indexOf(cat);
+  return CAT_COLORS[(i < 0 ? 0 : i) % CAT_COLORS.length];
 }
 function orderedSpaces() {
   const l = [...data.spaces].sort((a, b) => byAZ(a.name, b.name));
@@ -357,7 +379,8 @@ function suggestionsForToday(info, nowMin) {
         text: `${esc(a.name)} <small>(${a.minutes} min · ${esc(a.stack)}${g && wk < g ? ` · ${wk}/${g} esta semana` : ''})</small>` });
     }
     options.push({ icon: '☾', kind: 'rest', ref: '', min: Math.min(30, len), text: len >= 90 ? 'Descansar un rato, un paseo o no hacer nada' : 'Descansar un rato' });
-    const cards = { main: catCards.slice(0, MAX_CARDS), more: [] };
+    const restC = catCards.filter(c => c.cat === REST_CAT), othersC = catCards.filter(c => c.cat !== REST_CAT);
+    const cards = { main: [...othersC.slice(0, MAX_CARDS - restC.length), ...restC], more: [] }; // Descanso siempre entra y va la última
     out.push({ s: start, fs: f.s, e: f.e, len, options, cards, plan: [] });
   }
   return out;
@@ -474,7 +497,7 @@ function syncPlanLog(pl) {
 function catCard(c, g) {
   const lab = c.kind === 'hobby' ? esc(c.cat).toUpperCase() : c.kind === 'task' ? 'TAREA' : 'DESCANSO';
   const swap = c.more ? `<button type="button" class="cc-swap" data-act="cat-swap" data-id="${esc(c.key)}" aria-label="Otra de ${esc(c.cat)}" title="Otra de ${esc(c.cat)}">↻</button>` : '';
-  return `<div class="cat-card k-${c.kind}"><button type="button" class="sugg-opt cc-main" data-act="plan-add" data-kind="${c.kind}" data-ref="${esc(c.ref)}" data-start="${g.s}" data-min="${c.min}"><small>${lab}</small><b>${esc(c.title)}</b><span>${esc(c.sub)}</span><em>＋</em></button>${swap}</div>`;
+  return `<div class="cat-card k-${c.kind}" style="--cc:${catColor(c.cat)}"><button type="button" class="sugg-opt cc-main" data-act="plan-add" data-kind="${c.kind}" data-ref="${esc(c.ref)}" data-start="${g.s}" data-min="${c.min}"><small>${lab}</small><b>${esc(c.title)}</b><span>${esc(c.sub)}</span><em>＋</em></button>${swap}</div>`;
 }
 function catPicker() {
   const cats = orderedCats();
@@ -910,14 +933,15 @@ function hobbyBlock(cat, edit) {
       <div class="card-actions"><button class="primary small" data-act="log-hobby" data-id="${esc(a.id)}">✓ Hecho hoy</button><button class="text-button" data-act="edit-activity" data-id="${esc(a.id)}">Editar</button><button class="text-button danger" data-act="del-activity" data-id="${esc(a.id)}">Eliminar</button></div>
     </article>`; }).join('');
   const empty = cat === REST_CAT ? '<p class="empty small">Tu categoría de descanso: añade cosas como ver la tele, una siesta o escuchar música. Cuentan como descanso para tus estrellas.</p>' : '';
-  return `<div class="hobby-group${cat === REST_CAT ? ' rest-group' : ''}" data-ro-item="${esc(cat)}"><div class="stack-head"><span class="grip" data-ro-grip title="Arrastra para ordenar" aria-label="Arrastrar para ordenar">⋮⋮</span><h3>${esc(cat)}</h3>${cat === REST_CAT ? '' : `<button class="text-button" data-act="rename-stack" data-id="${esc(cat)}">Renombrar</button>`}<button class="text-button" data-act="add-to-cat" data-id="${esc(cat)}">＋ Añadir</button></div>
+  const col = catColor(cat);
+  return `<div class="hobby-group${cat === REST_CAT ? ' rest-group' : ''}" data-ro-item="${esc(cat)}" style="--cc:${col}"><div class="stack-head">${cat === REST_CAT ? '<span class="grip off" aria-hidden="true"></span>' : '<span class="grip" data-ro-grip title="Arrastra para ordenar" aria-label="Arrastrar para ordenar">⋮⋮</span>'}<h3>${esc(cat)}</h3><label class="cat-color" title="Color de la categoría"><input type="color" data-catcolor="${esc(cat)}" value="${col}" aria-label="Color de ${esc(cat)}"><span style="background:${col}"></span></label>${cat === REST_CAT ? '' : `<button class="text-button" data-act="rename-stack" data-id="${esc(cat)}">Renombrar</button>`}<button class="text-button" data-act="add-to-cat" data-id="${esc(cat)}">＋ Añadir</button></div>
     <div class="stack-col">${cards || empty}</div></div>`;
 }
 function renderBrain() {
   const edit = byId(data.activities, ui.editActivity);
   const stacks = orderedCats();
   const v = edit || { name: '', stack: ui.newStack || '', minutes: 20, energy: 'Baja', tags: '', goal: 0 };
-  const sortNote = data.settings.catCustom ? 'Los has ordenado a tu gusto. <button class="text-button" data-act="cat-az">Volver al orden A–Z</button>' : 'Van por orden alfabético. Arrastra ⋮⋮ para ordenarlos a tu gusto.';
+  const sortNote = (data.settings.catCustom ? 'Las has ordenado a tu gusto. <button class="text-button" data-act="cat-az">Volver al orden A–Z</button>' : 'Van por orden alfabético. Arrastra ⋮⋮ para ordenarlas a tu gusto.') + ' Descanso va siempre la última. Toca el círculo de color para cambiar el de cada categoría.';
   $('#app').innerHTML = head('Mis hobbies', 'Tus hobbies organizados por categorías para que elegir qué hacer sea más fácil.') + `
     <div class="section-head"><div><p class="eyebrow">TUS ACTIVIDADES</p><h2>Por categorías</h2></div></div>
     <p class="muted tiny sort-note">${sortNote}</p>
@@ -1235,6 +1259,7 @@ const actions = {
       const nn = n.trim(), st = data.settings, sw = l => (l || []).map(x => x === name ? nn : x);
       data.activities.forEach(a => { if (a.stack === name) a.stack = nn; });
       st.catOrder = sw(st.catOrder); st.hideCats = sw(st.hideCats);
+      if (st.catColors && st.catColors[name]) { st.catColors[nn] = st.catColors[name]; delete st.catColors[name]; }
       save(); render();
     }
   },
@@ -1271,6 +1296,8 @@ const actions = {
     }
     save(); render();
   },
+  'task-plan': id => { ui.taskPlan = same(ui.taskPlan, id) ? null : id; render(); },
+  'task-plan-close': () => { ui.taskPlan = null; render(); },
   'cat-pick': () => { ui.catOpen = !ui.catOpen; render(); },
   'sugg-go': id => {
     const el = $(`.sugg[data-fs="${id}"]`) || $('.now-panel'); if (!el) return;
@@ -1376,6 +1403,16 @@ const forms = {
     if (edit) Object.assign(edit, r); else data.routines.push({ id: uid(), ...r });
     ui.editRoutine = null; save(); render();
   },
+  'task-plan-form': f => {
+    const t = byId(data.tasks, f.dataset.id); if (!t) return;
+    const st = toMin(f.start.value), en = toMin(f.end.value);
+    if (en <= st) { alert('La hora de fin debe ser posterior a la de inicio.'); return; }
+    const bad = planConflict(f.date.value, '', st, en);
+    if (bad) { alert(bad); return; }
+    data.plan.push({ id: uid(), date: f.date.value, start: f.start.value, end: f.end.value, kind: 'task', refId: t.id, text: t.name, done: false });
+    ui.taskPlan = null; save(); render();
+    toast(`«${t.name}» está en tu agenda de ${f.date.value === today() ? 'hoy' : fmtDate(f.date.value)} de ${f.start.value} a ${f.end.value}.`);
+  },
   'plan-form': f => {
     const pl = byId(data.plan, f.dataset.id); if (!pl) return;
     const st = toMin(f.start.value), m = Math.max(5, Math.min(720, Math.round(+f.min.value) || 30));
@@ -1453,6 +1490,9 @@ app.addEventListener('change', async e => {
       save(); render();
       if (t.checked && pl.kind !== 'custom') cheer(pl.kind, r, skyList().length > n0);
     }
+  } else if (t.dataset.catcolor !== undefined) {
+    data.settings.catColors = { ...(data.settings.catColors || {}), [t.dataset.catcolor]: t.value };
+    save(); render();
   } else if (t.dataset.cat !== undefined) {
     const h = new Set(data.settings.hideCats || []);
     t.checked ? h.delete(t.dataset.cat) : h.add(t.dataset.cat);
