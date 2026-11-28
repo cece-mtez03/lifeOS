@@ -263,3 +263,9 @@ body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .checks{display:grid;gap:8px}.checks .check{display:flex;align-items:center;gap:8px}
 .help-list{margin:.6rem 0 0;padding-left:1.1rem;display:grid;gap:8px;color:var(--muted)}
 .help-list b{color:var(--ink)}
+
+/* v17 · constelación con huecos por rellenar */
+.c-line.ghost{stroke:rgba(255,255,255,.14);stroke-dasharray:2 6}
+.c-ghost{fill:none;stroke:rgba(255,255,255,.3);stroke-width:1.2}
+.sky-empty{padding:.4rem 1rem 1rem;text-align:center;margin:0}
+.sky-stage{position:relative}

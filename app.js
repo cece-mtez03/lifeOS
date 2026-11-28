@@ -745,7 +745,7 @@ function renderTracker() {
   const empty = !data.log.length;
   $('#app').innerHTML = head('Tracker', 'Cómo van tus hobbies: lo que haces, cuánto y cuándo. Para disfrutarlo, no para exigirte.') + `
     <section class="stats stats4">
-      <article class="stat"><span class="eyebrow">SESIONES ESTA SEMANA</span><strong>${wl.length}</strong><small>${dur(mins) === '0 min' ? 'Aún nada, sin prisa' : dur(mins) + ' en total'}</small></article>
+      <article class="stat"><span class="eyebrow">SESIONES ESTA SEMANA</span><strong>${wl.length}</strong><small>${dur(mins) === '0 min' ? ['Aún nada, y está bien', 'Todavía en blanco', 'Cuando te apetezca'][new Date().getDay() % 3] : dur(mins) + ' en total'}</small></article>
       <article class="stat"><span class="eyebrow">RACHA ACTUAL</span><strong>${st}</strong><small>${st === 1 ? 'día' : 'días'} seguidos</small></article>
       <article class="stat"><span class="eyebrow">MEJOR RACHA</span><strong>${best}</strong><small>${best === 1 ? 'día' : 'días'} seguidos</small></article>
       <article class="stat"><span class="eyebrow">SESIONES EN TOTAL</span><strong>${data.log.length}</strong><small>${new Set(data.log.map(l => l.activityId)).size} hobbies distintos</small></article>
@@ -880,9 +880,13 @@ function rnd(str) { // hash con buena dispersión (0–1) para colocar las estre
 function skySvg(stars, base, seen, mini) {
   const W = 400, H = 260, N = STARS_PER_LEVEL;
   const pts = stars.map((s, j) => ({ k: s.k, kind: s.x, x: 28 + j * (W - 56) / (N - 1) + (rnd('x' + (base + j)) - .5) * 24, y: 36 + rnd('y' + (base + j)) * (H - 72), isNew: base + j >= seen }));
+  const pos = j => ({ x: 28 + j * (W - 56) / (N - 1) + (rnd('x' + (base + j)) - .5) * 24, y: 36 + rnd('y' + (base + j)) * (H - 72) });
+  const ghosts = mini ? [] : Array.from({ length: Math.max(0, N - pts.length) }, (_, i) => pos(pts.length + i));
+  const ghostLine = ghosts.length > 1 || (ghosts.length && pts.length) ? `<polyline class="c-line ghost" points="${[...pts.slice(-1), ...ghosts].map(q => q.x.toFixed(1) + ',' + q.y.toFixed(1)).join(' ')}"/>` : '';
+  const ghostDots = ghosts.map(q => `<circle class="c-ghost" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="3"/>`).join('');
   const line = pts.length > 1 ? `<polyline class="c-line" points="${pts.map(q => q.x.toFixed(1) + ',' + q.y.toFixed(1)).join(' ')}"/>` : '';
   const dots = pts.map((q, j) => `<circle class="c-star${q.isNew && !mini ? ' new' : ''}" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="${mini ? 3 : 4}" fill="${STAR_KINDS[q.kind].color}" style="--d:${(j % 5) * .5}s;color:${STAR_KINDS[q.kind].color}"><title>Semana del ${fmtDate(q.k)} · estrella de ${STAR_KINDS[q.kind].name}</title></circle>`).join('');
-  return `<svg class="${mini ? 'sky-mini' : 'sky-svg'}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Constelación">${line}${dots}</svg>`;
+  return `<svg class="${mini ? 'sky-mini' : 'sky-svg'}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Constelación">${ghostLine}${ghostDots}${line}${dots}</svg>`;
 }
 function weekRecap(wk) { // resumen de una semana (lunes = wk)
   const e = new Date(parseYmd(wk)); e.setDate(e.getDate() + 6); const end = ymd(e);
@@ -935,7 +939,7 @@ function renderSky() {
   $('#app').innerHTML = head('Mi cielo', 'Cada cosa que haces suma, también descansar. Aquí crece tu constelación.') + `
     <section class="panel sky-hero">
       <div class="sky-top"><div><p class="eyebrow">NIVEL ${level}</p><h2>${esc(LEVELS[Math.min(level - 1, LEVELS.length - 1)])}</h2></div><div class="sky-total"><strong>${total}</strong><small>${total === 1 ? 'estrella' : 'estrellas'}</small></div></div>
-      <div class="sky-stage">${total ? skySvg(chunk, done * STARS_PER_LEVEL, seen, false) : '<p class="sky-empty">Tu cielo está esperando su primera estrella ✦</p>'}</div>
+      <div class="sky-stage">${skySvg(chunk, done * STARS_PER_LEVEL, seen, false)}${total ? '' : '<p class="sky-empty">Tu cielo está esperando su primera estrella ✦</p>'}</div>
       <div class="bar" role="progressbar" aria-valuenow="${into}" aria-valuemin="0" aria-valuemax="${STARS_PER_LEVEL}"><i style="width:${pct}%"></i></div>
       <p class="muted">${into} de ${STARS_PER_LEVEL} estrellas para el nivel ${level + 1}${next ? ' y desbloquear a ' + next[0] : ''}.</p>
     </section>
