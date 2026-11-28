@@ -31,6 +31,12 @@ const initial = {
 function normalize(raw) {
   const d = Object.assign(structuredClone(initial), raw && typeof raw === 'object' ? raw : {});
   ['tasks', 'activities', 'events', 'spaces', 'routines', 'dump', 'plan', 'log'].forEach(k => { if (!Array.isArray(d[k])) d[k] = []; });
+  d.events = d.events.filter(e => { // un solo concepto: lo que escribías a mano en el calendario ahora es un plan
+    if (!e || e.src === 'ics' || e.allDay) return true;
+    const st = e.time || '09:00', en = e.end && e.end > st ? e.end : fmtMin(Math.min(toMin(st) + 60, 1439));
+    if (!d.plan.some(p => String(p.id) === String(e.id))) d.plan.push({ id: e.id, date: e.date, start: st, end: en, kind: 'custom', refId: '', text: e.name || 'Plan', done: false });
+    return false;
+  });
   d.sky = Object.assign({ best: {}, seen: 0 }, d.sky && typeof d.sky === 'object' ? d.sky : {});
   if (!d.sky.best || typeof d.sky.best !== 'object') d.sky.best = {};
   d.settings = Object.assign({ dayStart: '08:00', dayEnd: '22:00', season: 'auto', phase: 'auto', workLimit: 6 }, d.settings);
@@ -200,7 +206,8 @@ function page(view) {
   window.scrollTo({ top: 0 });
 }
 function render() {
-  $$('.nav').forEach(b => b.classList.toggle('active', b.dataset.view === ui.view));
+  $$('.nav').forEach(b => b.classList.toggle('active', b.dataset.settings ? ui.view === 'calendar' && !!ui.calSettings : b.dataset.more ? ['tracker', 'sky', 'space'].includes(ui.view) : b.dataset.view === ui.view));
+  const sheet = $('#more-sheet'); if (sheet) sheet.hidden = true;
   ({ today: renderHome, tasks: renderTasks, calendar: renderCalendar, brain: renderBrain, tracker: renderTracker, sky: renderSky, space: renderSpace }[ui.view] || renderHome)();
 }
 const head = (t, sub) => `<p class="eyebrow">PLANET ME</p><h1 class="view-title">${t}</h1><p class="view-intro">${sub}</p>`;
@@ -220,7 +227,7 @@ function dayInfo(ds) {
     blocks.push({ s, e, name: ev.name, kind: 'event', id: ev.id });
   });
   data.plan.forEach(p => {
-    if (p.date === ds) blocks.push({ s: toMin(p.start), e: toMin(p.end), name: p.text, kind: 'plan', id: p.id, done: !!p.done });
+    if (p.date === ds) blocks.push({ s: toMin(p.start), e: toMin(p.end), name: p.text, kind: 'plan', pkind: p.kind, id: p.id, done: !!p.done });
   });
   blocks.sort((a, b) => a.s - b.s);
   const ws = toMin(data.settings.dayStart), we = toMin(data.settings.dayEnd);
@@ -369,54 +376,58 @@ function skyCard() {
       <small>${total} ${total === 1 ? 'estrella' : 'estrellas'} · faltan ${STARS_PER_LEVEL - into} para el nivel ${level + 1}${next ? ' (' + next[0] + ')' : ''}</small></span>
     <span class="sc-go" aria-hidden="true">→</span></button>`;
 }
+const PLAN_ICON = { task: '☷', hobby: '✧', rest: '☾', custom: '●' };
+function tlRow(x, nowMin) {
+  const cls = `tl k-${x.kind}${x.done ? ' done-slot' : ''}${x.e <= nowMin ? ' past' : ''}${x.s <= nowMin && nowMin < x.e ? ' now' : ''}`;
+  const time = `<time><b>${fmtMin(x.s)}</b><small>${fmtMin(x.e)}</small></time>`;
+  const now = x.s <= nowMin && nowMin < x.e ? '<em class="now-tag">ahora</em>' : '';
+  if (x.kind === 'free') return `<li class="${cls}">${time}<div class="tl-body"><span class="tl-free">Libre · ${dur(x.e - x.s)}</span>${now}</div></li>`;
+  if (x.kind === 'plan') return `<li class="${cls}">${time}<div class="tl-body"><input type="checkbox" data-plan="${esc(x.id)}" ${x.done ? 'checked' : ''} aria-label="Hecho"><span class="tl-name">${PLAN_ICON[x.pkind] || '●'} ${esc(x.name)}</span>${now}<button class="icon-btn" data-act="del-plan" data-id="${esc(x.id)}" aria-label="Quitar de mi día">×</button></div></li>`;
+  const del = x.kind === 'event' ? `<button class="icon-btn" data-act="del-event" data-id="${esc(x.id)}" aria-label="Eliminar plan">×</button>` : '';
+  return `<li class="${cls}">${time}<div class="tl-body"><span class="tl-name">${x.kind === 'routine' ? '◷' : '▦'} ${esc(x.name)}</span>${now}${del}</div></li>`;
+}
+function gapHtml(g) {
+  return `<div class="sugg"><div class="sugg-head"><b>${fmtMin(g.s)}–${fmtMin(g.e)}</b><span>${dur(g.len)} libres. Te propongo este plan:</span></div>
+    ${g.plan.length ? `<ul class="plan-list">${g.plan.map(i => `<li><i>${i.icon}</i> <b>${esc(i.text)}</b> <small>${fmtMin(i.s)} · ${i.min} min${i.cat ? ' · ' + esc(i.cat) : ''}</small></li>`).join('')}</ul>
+    <div class="form-actions"><button type="button" class="primary small" data-act="plan-add-all" data-start="${g.s}" data-items="${esc(JSON.stringify(g.plan.map(i => ({ kind: i.kind, ref: i.ref, min: i.min }))))}">＋ Añadir este plan a mi día</button><button type="button" class="text-button" data-act="sugg-shuffle" data-id="${g.s}">↻ Otra combinación</button></div>` : ''}
+    <details class="sugg-more"><summary>Prefiero elegir cosas sueltas</summary><ul>${g.options.map(o => `<li><button type="button" class="sugg-opt" data-act="plan-add" data-kind="${o.kind}" data-ref="${esc(o.ref)}" data-start="${g.s}" data-min="${o.min}"><i>${o.icon}</i><span>${o.text}</span><em>＋</em></button></li>`).join('')}</ul></details></div>`;
+}
 function renderHome() {
   const d = new Date(), ts = today(), nowMin = d.getHours() * 60 + d.getMinutes();
   const greeting = { manana: 'Buenos días.', tarde: 'Buenas tardes.', noche: 'Buenas noches.' }[themeNow().phase];
-  const todays = data.tasks.filter(t => t.date === ts);
   const info = dayInfo(ts);
-  const slots = info.slots.filter(x => x.kind !== 'free' || x.e > nowMin);
-  const plans = data.plan.filter(p => p.date === ts).sort((a, b) => a.start.localeCompare(b.start));
+  const planned = new Set(data.plan.filter(p => p.date === ts && p.kind === 'task').map(p => String(p.refId)));
+  const todays = data.tasks.filter(t => t.date === ts && !planned.has(String(t.id)));
+  const pendingAll = data.tasks.filter(t => !t.done).length;
   const work = workMinutes(ts), heavy = work >= workLimitMin();
+  const gaps = suggestionsForToday(info, nowMin), first = gaps[0], rest = gaps.slice(1);
+  const slots = info.slots.filter(x => x.kind !== 'free' || x.e > nowMin);
+  const total = skyList().length;
+  const nowTitle = first && first.s <= nowMin + 5 ? 'Ahora te cabe…' : 'Tu próximo hueco';
   $('#app').innerHTML = `
-    <section class="welcome"><div><p class="eyebrow">${esc(d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase())}</p><h1>${greeting}</h1><p class="muted">${esc(themeLine())}</p></div><div class="sun" aria-hidden="true">${themeGlyph()}</div></section>
-    <section class="stats">
-      <article class="stat"><span class="eyebrow">TAREAS PENDIENTES</span><strong>${data.tasks.filter(t => !t.done).length}</strong><small>Sin prisa, pero sin perderlas</small></article>
-      <article class="stat"><span class="eyebrow">TIEMPO LIBRE HOY</span><strong>${dur(info.freeTotal)}</strong><small>Entre tus planes y tu horario</small></article>
+    <section class="welcome compact"><div><p class="eyebrow">${esc(d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase())}</p><h1>${greeting}</h1><p class="muted">${esc(themeLine())}</p></div>
+      <button type="button" class="star-chip" data-act="go" data-id="sky" aria-label="Mi cielo: ${total} estrellas">✦ <b>${total}</b></button></section>
+    <section class="panel now-panel">
+      <p class="eyebrow">${first ? 'TU PRÓXIMO PLAN' : 'HOY'}</p><h2>${first ? nowTitle : 'Sin huecos por hoy'}</h2>
+      ${heavy ? `<p class="note">Hoy tienes ${dur(work)} de trabajo, así que no te propongo tareas de trabajo, salvo las de prioridad alta.</p>` : ''}
+      ${first ? gapHtml(first) + (rest.length ? `<details class="sugg-more other-gaps"><summary>Otros huecos de hoy (${rest.length})</summary>${rest.map(gapHtml).join('')}</details>` : '') : '<div class="empty">Hoy no te quedan huecos libres. Disfruta lo que tienes en la agenda.</div>'}
     </section>
-    ${skyCard()}
+    <section class="panel">
+      <div class="section-head"><div><p class="eyebrow">AGENDA</p><h2>Tu día</h2></div><button class="text-button" data-act="go" data-id="calendar">Ver semana →</button></div>
+      ${info.allDay.map(ev => `<div class="slot allday"><b>Todo el día</b><span>${esc(ev.name)}</span></div>`).join('')}
+      ${slots.length ? `<ol class="timeline">${slots.map(x => tlRow(x, nowMin)).join('')}</ol>` : '<div class="empty">Nada en la agenda de hoy.</div>'}
+    </section>
+    <section class="panel">
+      <div class="section-head"><div><p class="eyebrow">HOY</p><h2>Tareas de hoy</h2></div><button class="text-button" data-act="go" data-id="tasks">${pendingAll} pendientes en total →</button></div>
+      ${todays.length ? todays.map(t => taskRow(t)).join('') : '<div class="empty">Nada marcado para hoy. Puedes elegir una tarea en tu próximo plan.</div>'}
+    </section>
     ${recapCard()}
     ${showSignin() ? `<section class="panel suggestion signin-card">
       <div><p class="eyebrow">TUS DATOS, EN TODAS PARTES</p><h2>Entra para no perder nada</h2>
         <p class="muted">Con tu cuenta de Google, tus tareas y planes se guardan y se sincronizan entre tu móvil y tu ordenador.</p></div>
       <div class="signin-actions"><button class="primary" data-act="sync-signin">Entrar con Google</button><button class="text-button" data-act="signin-dismiss">Ahora no</button></div>
     </section>` : ''}
-    <section class="panel">
-      <div class="section-head"><div><p class="eyebrow">HOY</p><h2>Tu lista de hoy</h2></div><button class="text-button" data-act="go" data-id="tasks">Ver tareas →</button></div>
-      ${todays.length ? todays.map(t => taskRow(t)).join('') : '<div class="empty">Todavía no has añadido tareas para hoy.</div>'}
-    </section>
-    <section class="panel">
-      <div class="section-head"><div><p class="eyebrow">AGENDA</p><h2>Tu día</h2></div><button class="text-button" data-act="go" data-id="calendar">Ver semana →</button></div>
-      ${info.allDay.map(ev => `<div class="slot allday"><b>Todo el día</b><span>${esc(ev.name)}</span></div>`).join('')}
-      ${slots.length ? `<div class="slots">${slots.map(slotHtml).join('')}</div>` : '<div class="empty">Nada en la agenda de hoy.</div>'}
-    </section>
-    <section class="panel life-panel">
-      <p class="eyebrow">TU RATO PARA TI</p><h2>Mi vida más allá del trabajo</h2>
-      ${plans.length ? plans.map(planRow).join('') : '<p class="empty">Toca una de las sugerencias de abajo y se añade a tu día.</p>'}
-    </section>
-    <section class="panel">
-      <p class="eyebrow">SUGERENCIAS</p><h2>Para tus huecos de hoy</h2>
-      ${heavy ? `<p class="note">Hoy ya llevas ${dur(work)} de trabajo, así que no te propongo tareas de trabajo, salvo las de prioridad alta.</p>` : ''}
-      ${suggestionsForToday(info, nowMin).map(g => `
-        <div class="sugg"><div class="sugg-head"><b>${fmtMin(g.s)}–${fmtMin(g.e)}</b><span>Tienes un hueco libre de ${dur(g.len)}. Te propongo este plan:</span></div>
-          ${g.plan.length ? `<ul class="plan-list">${g.plan.map(i => `<li><i>${i.icon}</i> <b>${esc(i.text)}</b> <small>${fmtMin(i.s)} · ${i.min} min${i.cat ? ' · ' + esc(i.cat) : ''}</small></li>`).join('')}</ul>
-          <div class="form-actions"><button type="button" class="primary small" data-act="plan-add-all" data-start="${g.s}" data-items="${esc(JSON.stringify(g.plan.map(i => ({ kind: i.kind, ref: i.ref, min: i.min }))))}">＋ Añadir este plan a mi día</button><button type="button" class="text-button" data-act="sugg-shuffle" data-id="${g.s}">↻ Otra combinación</button></div>` : ''}
-          <details class="sugg-more"><summary>Prefiero elegir cosas sueltas</summary><ul>${g.options.map(o => `<li><button type="button" class="sugg-opt" data-act="plan-add" data-kind="${o.kind}" data-ref="${esc(o.ref)}" data-start="${g.s}" data-min="${o.min}"><i>${o.icon}</i><span>${o.text}</span><em>＋</em></button></li>`).join('')}</ul></details></div>`).join('')
-        || '<div class="empty">Hoy no te quedan huecos libres. Disfruta lo que tienes en la agenda.</div>'}
-    </section>
-    <section class="panel suggestion">
-      <div><p class="eyebrow">UNA IDEA PARA TU TIEMPO LIBRE</p><h2>¿Un ratito para ti?</h2><p class="muted">Tus hobbies pueden ayudarte a elegir algo que encaje con tu tiempo y energía.</p></div>
-      <button class="primary" data-act="go" data-id="brain">Buscar un plan ✧</button>
-    </section>`;
+    ${skyCard()}`;
 }
 
 /* ---------- Tareas con espacios ---------- */
@@ -469,7 +480,7 @@ function renderCalendar() {
   const monday = mondayOf(new Date()); monday.setDate(monday.getDate() + ui.weekOffset * 7);
   const days = Array.from({ length: 7 }, (_, i) => { const x = new Date(monday); x.setDate(x.getDate() + i); return x; });
   const range = `${days[0].toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} – ${days[6].toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}`;
-  const upcoming = data.events.filter(e => e.date >= ts).sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || ''))).slice(0, 12);
+  const upcoming = [...data.events.filter(e => e.date >= ts), ...data.plan.filter(p => p.kind === 'custom' && p.date >= ts).map(p => ({ id: p.id, name: p.text, date: p.date, time: p.start, end: p.end, isPlan: true }))].sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || ''))).slice(0, 12);
   const importedCount = data.events.filter(e => e.src === 'ics').length;
   const er = byId(data.routines, ui.editRoutine);
   const rv = er || { name: '', start: '09:00', end: '17:00', days: [1, 2, 3, 4, 5], work: true };
@@ -525,6 +536,7 @@ function renderCalendar() {
     ` : ''}
     <section class="panel">
       <p class="eyebrow">PLANES</p><h2>Añadir un plan</h2>
+      <p class="muted">Un plan es cualquier cosa que quieras colocar en tu día: aparece en tu semana y en Mi día. Lo que añades desde las sugerencias también es un plan.</p>
       <form id="event-form" class="form-row">
         <input class="field" name="name" placeholder="Nombre del plan" required>
         <input class="field" name="date" type="date" value="${ts}" required>
@@ -534,7 +546,7 @@ function renderCalendar() {
       </form>
       <div class="calendar-list">${upcoming.map(e => `<div class="calendar-event"><b>${fmtDate(e.date)} · ${e.allDay ? 'Todo el día' : esc(e.time) + (e.end ? '–' + esc(e.end) : '')}</b>${esc(e.name)}
         <a class="text-button" href="${esc(gcalLink(e))}" target="_blank" rel="noopener">+ Google</a>
-        <button class="icon-btn" data-act="del-event" data-id="${esc(e.id)}" aria-label="Eliminar plan">×</button></div>`).join('') || '<p class="empty">No hay planes próximos.</p>'}</div>
+        <button class="icon-btn" data-act="${e.isPlan ? 'del-plan' : 'del-event'}" data-id="${esc(e.id)}" aria-label="Eliminar plan">×</button></div>`).join('') || '<p class="empty">No hay planes próximos.</p>'}</div>
     </section>`;
   const wk = $('.week'), td = $('.day.today');
   if (wk && td && wk.scrollWidth > wk.clientWidth) wk.scrollLeft = Math.max(0, td.offsetLeft - wk.offsetLeft - 4);
@@ -711,15 +723,15 @@ function renderBrain() {
   const v = edit || { name: '', stack: '', minutes: 20, energy: 'Baja', tags: '', goal: 0 };
   $('#app').innerHTML = head('Hobbies', 'Tus hobbies organizados por categorías para que elegir qué hacer sea más fácil.') + `<p class="muted">¿Quieres ver cómo vas? <button class="text-button" data-act="go" data-id="tracker">Abrir mi tracker →</button></p>` + `
     <div class="section-head"><div><p class="eyebrow">TUS ACTIVIDADES</p><h2>Mis hobbies</h2></div></div>
-    ${stacks.map(s => `
-      <div class="stack-head"><h3>${esc(s)}</h3><button class="text-button" data-act="rename-stack" data-id="${esc(s)}">Renombrar</button></div>
-      <div class="stack-grid">${data.activities.filter(a => a.stack === s).map(a => {
+    <div class="hobby-groups">${stacks.map(s => `
+      <div class="hobby-group"><div class="stack-head"><h3>${esc(s)}</h3><button class="text-button" data-act="rename-stack" data-id="${esc(s)}">Renombrar</button></div>
+      <div class="stack-col">${data.activities.filter(a => a.stack === s).map(a => {
         const wk = weekCount(a.id), g = goalOf(a), tn = logsOf(a.id).filter(l => l.date === today()).length;
-        return `<article class="stack-card${edit && same(edit.id, a.id) ? ' editing' : ''}"><span class="pill">${esc(a.stack)}</span><h3>${esc(a.name)}</h3>
+        return `<article class="stack-card${edit && same(edit.id, a.id) ? ' editing' : ''}"><h3>${esc(a.name)}</h3>
           <p>${esc(a.minutes)} min · Energía ${esc(a.energy.toLowerCase())}${g ? ` · objetivo ${g}/semana` : ''}</p><span class="tiny">${esc(a.tags || '')}</span>
           <p class="trk-line">Esta semana: ${wk}${g ? '/' + g : ''} · última vez: ${ago(lastDone(a.id))}${tn ? ` · hoy ✓${tn > 1 ? ' ×' + tn : ''}` : ''}</p>
           <div class="card-actions"><button class="primary small" data-act="log-hobby" data-id="${esc(a.id)}">✓ Hecho hoy</button><button class="text-button" data-act="edit-activity" data-id="${esc(a.id)}">Editar</button><button class="text-button danger" data-act="del-activity" data-id="${esc(a.id)}">Eliminar</button></div>
-        </article>`; }).join('')}</div>`).join('') || '<p class="empty">Aún no hay hobbies. Añade el primero más abajo.</p>'}
+        </article>`; }).join('')}</div></div>`).join('')}</div>${data.activities.length ? '' : '<p class="empty">Aún no hay hobbies. Añade el primero más abajo.</p>'}
     <section class="panel" id="activity-form-panel">
       <h2>${edit ? 'Editar hobby' : 'Añade un hobby'}</h2>
       <form id="activity-form" class="form-grid" autocomplete="off">
@@ -1072,14 +1084,15 @@ const forms = {
     save(); render();
   },
   'activity-form': f => {
-    const item = { name: f.name.value.trim(), stack: f.stack.value.trim(), minutes: +f.minutes.value || 20, energy: f.energy.value, tags: f.tags.value.trim(), goal: Math.max(0, Math.min(14, Math.round(+f.goal.value || 0))) };
+    const stk = f.stack.value.trim(), known = data.activities.map(a => a.stack).find(c => norm(c) === norm(stk));
+    const item = { name: f.name.value.trim(), stack: known || stk, minutes: +f.minutes.value || 20, energy: f.energy.value, tags: f.tags.value.trim(), goal: Math.max(0, Math.min(14, Math.round(+f.goal.value || 0))) };
     const edit = byId(data.activities, ui.editActivity);
     if (edit) Object.assign(edit, item); else data.activities.push({ id: uid(), ...item });
     ui.editActivity = null; save(); render();
   },
   'event-form': f => {
     if (toMin(f.end.value) <= toMin(f.time.value)) { alert('La hora de fin debe ser posterior a la de inicio.'); return; }
-    data.events.push({ id: uid(), name: f.name.value.trim(), date: f.date.value, time: f.time.value, end: f.end.value });
+    data.plan.push({ id: uid(), date: f.date.value, start: f.time.value, end: f.end.value, kind: 'custom', refId: '', text: f.name.value.trim(), done: false });
     save(); render();
   },
   'routine-form': f => {
@@ -1150,7 +1163,14 @@ app.addEventListener('input', e => { // al escribir un hobby, sugiere minutos, e
   else if (['minutes', 'energy', 'stack', 'tags', 'goal'].includes(t.name)) f.dataset['t' + t.name] = '1';
 });
 
-$$('.nav').forEach(b => b.onclick = () => page(b.dataset.view));
+$$('.nav').forEach(b => b.onclick = () => {
+  if (b.dataset.more) { const sh = $('#more-sheet'); sh.hidden = !sh.hidden; return; }
+  if (b.dataset.settings) ui.calSettings = true;
+  page(b.dataset.view);
+});
+const moreSheet = $('#more-sheet');
+if (moreSheet) moreSheet.addEventListener('click', e => { if (e.target === moreSheet) moreSheet.hidden = true; });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && moreSheet) moreSheet.hidden = true; });
 $('.brand').addEventListener('click', e => { e.preventDefault(); page('today'); });
 $('#top-account').addEventListener('click', () => {
   const S = window.LifeSync && window.LifeSync.state;

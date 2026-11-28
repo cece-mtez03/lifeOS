@@ -202,3 +202,50 @@ body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .recap-grid small{color:var(--muted);font-size:.75rem}.recap-grid i{font-style:normal}
 @media(max-width:560px){.recap-grid{grid-template-columns:repeat(2,1fr)}}
 .recap-card{background:linear-gradient(160deg,var(--soft,#edf2e9),var(--paper,#fff))}
+
+/* v15 · Mi día, navegación, hobbies */
+.sidebar .eyebrow.group{margin-top:22px}
+.welcome.compact{margin:4px 0 18px;align-items:flex-start}.welcome.compact h1{margin:4px 0}
+.star-chip{border:0;cursor:pointer;background:linear-gradient(160deg,#2b2447,#5a3d62);color:#f6efe4;border-radius:999px;padding:8px 14px;font:500 14px 'DM Sans';white-space:nowrap}
+.star-chip{box-shadow:0 4px 12px rgba(40,25,60,.25)}.star-chip b{color:#f3c969;font-weight:600}
+.now-panel .sugg{background:transparent;padding:0}
+.timeline{list-style:none;margin:.5rem 0 0;padding:0;display:grid;gap:6px}
+.tl{display:grid;grid-template-columns:50px 1fr;gap:10px;align-items:stretch}
+.tl time{display:flex;flex-direction:column;text-align:right;padding-top:11px;line-height:1.2}
+.tl time b{font-size:13px;color:var(--head);font-weight:600}.tl time small{font-size:10px;color:var(--faint)}
+.tl-body{display:flex;align-items:center;gap:9px;border-radius:12px;padding:10px 12px;min-height:46px;background:var(--soft);border-left:4px solid var(--line2);font-size:14px;min-width:0}
+.tl-name{flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
+.tl.k-routine .tl-body{background:var(--routine-bg);color:var(--routine-fg);border-left-color:var(--routine-fg)}
+.tl.k-event .tl-body{background:var(--event-bg);color:var(--event-fg);border-left-color:var(--event-fg)}
+.tl.k-plan .tl-body{background:var(--soft2);color:var(--ink);border-left-color:var(--accent)}
+.tl.k-free .tl-body{background:transparent;border:1px dashed var(--line2);color:var(--free)}
+.tl.past{opacity:.55}.tl.now .tl-body{box-shadow:0 0 0 2px var(--accent)}.tl.now{opacity:1}
+.tl-body .icon-btn{margin-left:auto}.tl-body input[type=checkbox]{flex:none}
+.now-tag{font-style:normal;font-size:10px;letter-spacing:.08em;text-transform:uppercase;background:var(--accent);color:var(--ontop);border-radius:999px;padding:2px 8px;margin-left:6px}
+.tl.done-slot .tl-name{text-decoration:line-through;opacity:.65}
+.other-gaps{margin-top:.8rem}
+.sky-card{padding:12px 16px;margin:0 0 6px}.sky-card .sc-icon{font-size:1.4rem}.sky-card b{font-size:1rem}
+/* navegación inferior en el móvil */
+.tabbar,.more-sheet{display:none}
+@media(max-width:760px){
+  .sidebar{display:none}
+  .shell{margin-top:14px}
+  body{padding-bottom:calc(74px + env(safe-area-inset-bottom))}
+  .tabbar{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--paper);border-top:1px solid var(--line);padding:6px 6px calc(6px + env(safe-area-inset-bottom));box-shadow:0 -6px 20px var(--shadow)}
+  .tabbar .nav{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 2px;font-size:10.5px;text-align:center;white-space:nowrap;border-radius:12px}
+  .tabbar .nav i{font-style:normal;font-size:19px;line-height:1}.tabbar .nav span{margin:0}
+  .more-sheet:not([hidden]){display:flex;position:fixed;inset:0 0 calc(66px + env(safe-area-inset-bottom)) 0;z-index:70;background:rgba(20,12,10,.45);align-items:flex-end}
+  .sheet-card{width:100%;background:var(--paper);border-radius:22px 22px 0 0;padding:14px;display:grid;gap:4px;box-shadow:0 -8px 24px var(--shadow)}
+  .sheet-card .nav{display:flex;align-items:center;gap:12px;font-size:15px;padding:14px;white-space:normal}
+  .sheet-card .nav i{font-style:normal;font-size:20px;width:26px;text-align:center}.sheet-card .nav span{margin:0}
+  #toast{bottom:92px}
+  .tl{grid-template-columns:44px 1fr;gap:8px}
+  footer{padding-bottom:10px}
+}
+/* hobbies: una columna por categoría */
+.hobby-groups{columns:290px;column-gap:22px;margin-bottom:28px}
+.hobby-group{break-inside:avoid;margin-bottom:14px}
+.hobby-group .stack-head{margin:6px 0 10px}
+.stack-col{display:grid;gap:14px}
+#activity-form-panel{margin-top:10px}
+.plan{margin-top:22px}
