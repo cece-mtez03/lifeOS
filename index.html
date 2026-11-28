@@ -19,21 +19,13 @@
   </header>
   <div class="shell">
     <aside class="sidebar">
-      <p class="eyebrow">TU ESPACIO</p>
       <nav>
         <button class="nav active" data-view="today">◷ <span>Mi día</span></button>
-        <button class="nav" data-view="tasks">☷ <span>Mis tareas</span></button>
         <button class="nav" data-view="calendar">▦ <span>Mi calendario</span></button>
+        <button class="nav" data-view="tasks">☷ <span>Mis tareas</span></button>
+        <button class="nav" data-view="brain">✧ <span>Mis hobbies</span></button>
         <button class="nav" data-view="space">⌂ <span>Mi espacio</span></button>
       </nav>
-      <p class="eyebrow group">TUS HOBBIES</p>
-      <nav>
-        <button class="nav" data-view="brain">✧ <span>Hobbies</span></button>
-        <button class="nav" data-view="tracker">▤ <span>Tracker</span></button>
-        <button class="nav" data-view="sky">✦ <span>Mi cielo</span></button>
-      </nav>
-      <p class="eyebrow group">AJUSTES</p>
-      <nav><button class="nav" data-view="calendar" data-settings="1">⚙ <span>Horario y jornada</span></button></nav>
       <div class="sidebar-note"><span>✦</span><p>Una vida organizada también deja espacio para disfrutarla.</p></div>
     </aside>
     <main id="app" class="main">
@@ -57,19 +49,11 @@
   </div>
   <nav class="tabbar" aria-label="Navegación principal">
     <button class="nav active" data-view="today"><i>◷</i><span>Mi día</span></button>
-    <button class="nav" data-view="tasks"><i>☷</i><span>Tareas</span></button>
     <button class="nav" data-view="calendar"><i>▦</i><span>Calendario</span></button>
+    <button class="nav" data-view="tasks"><i>☷</i><span>Tareas</span></button>
     <button class="nav" data-view="brain"><i>✧</i><span>Hobbies</span></button>
-    <button class="nav" data-more="1" type="button" aria-haspopup="true"><i>⋯</i><span>Más</span></button>
+    <button class="nav" data-view="space"><i>⌂</i><span>Espacio</span></button>
   </nav>
-  <div id="more-sheet" class="more-sheet" hidden>
-    <div class="sheet-card" role="menu">
-      <button class="nav" data-view="tracker"><i>▤</i><span>Tracker</span></button>
-      <button class="nav" data-view="sky"><i>✦</i><span>Mi cielo</span></button>
-      <button class="nav" data-view="space"><i>⌂</i><span>Mi espacio</span></button>
-      <button class="nav" data-view="calendar" data-settings="1"><i>⚙</i><span>Horario y jornada</span></button>
-    </div>
-  </div>
   <footer>Planet Me <span>·</span> Tu mundo, a tu ritmo <span>·</span> by Planet Planners &amp; Merch</footer>
   <script src="app.js"></script>
   <script type="module" src="sync.js"></script>

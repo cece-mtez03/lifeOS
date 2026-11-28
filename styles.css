@@ -302,3 +302,23 @@ body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .plan-form .form-actions,.plan-form small{grid-column:1/-1}.plan-form .form-actions{display:flex;gap:10px;align-items:center}
 @media(max-width:760px){.plan-form{grid-template-columns:1fr 1fr}.plan-form .fld:first-child{grid-column:1/-1}.tl-editor{margin-left:52px}}
 @media(max-width:760px){.tl-body{gap:5px;padding:8px 8px}.tl-body .tl-name{flex:1 1 64px}.tl-body .icon-btn{padding:4px 5px}.tl-grip{padding:6px 2px;margin-left:-2px}.tl-body .now-tag{font-size:9px;padding:2px 6px}.tl-real{display:block;width:100%;order:9}}
+
+/* v20: bloques de categorías, orden por arrastre, calendario tocable, hobbies con pestañas */
+.hobby-groups{columns:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;align-items:start;margin-bottom:28px}
+.hobby-group{break-inside:auto;margin:0;background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:14px 14px 16px;position:relative}
+.hobby-group .stack-head{display:flex;align-items:center;gap:8px;margin:0 0 12px;flex-wrap:wrap}
+.hobby-group .stack-head h3{margin:0;flex:1 1 auto;min-width:80px}
+.hobby-group .stack-head .text-button{font-size:12px;padding:2px 4px}
+.hobby-group.rest-group{border-color:var(--accent)}
+.grip{flex:none;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;color:var(--faint);letter-spacing:-2px;font-size:15px;padding:6px 6px;margin-left:-4px;border-radius:6px}.grip:hover{background:var(--sage);color:var(--head)}
+.space-top{display:flex;align-items:center;gap:8px}.space-top small{margin-left:auto}
+.ro-dragging{position:relative;z-index:30;opacity:.92;filter:drop-shadow(0 10px 20px var(--shadow));cursor:grabbing}
+.ro-before{box-shadow:-5px 0 0 0 var(--accent)}.ro-after{box-shadow:5px 0 0 0 var(--accent)}
+.sort-note{margin:-6px 0 12px}.sort-note .text-button{font-size:12px;padding:0}
+.hseg{margin-top:0}
+.slot.tap{cursor:pointer;transition:background .15s,transform .1s}.slot.tap:hover{background:var(--soft2)}.slot.tap:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.slot.free.tap{position:relative;border-style:dashed}.slot.free.tap em{margin-left:auto;font-style:normal;color:var(--free);opacity:.6}.slot.free.tap:hover em{opacity:1}
+.cal-panel{border-color:var(--accent)}
+.sidebar nav:first-child{margin-top:6px}
+.tabbar .nav{min-width:0}
+@media(max-width:760px){.hobby-groups{grid-template-columns:1fr}}
