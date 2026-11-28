@@ -249,3 +249,17 @@ body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .stack-col{display:grid;gap:14px}
 #activity-form-panel{margin-top:10px}
 .plan{margin-top:22px}
+
+/* v16 · celebración, tareas por día, inicio guiado, ayuda */
+.spark{position:fixed;z-index:90;pointer-events:none;font-size:14px;transform:translate(-50%,-50%);animation:spark .85s ease-out forwards}
+@keyframes spark{0%{opacity:1;transform:translate(-50%,-50%) scale(.4)}70%{opacity:1}100%{opacity:0;transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy))) scale(1.2)}}
+@media(prefers-reduced-motion:reduce){.spark{display:none}}
+.seg{display:inline-flex;gap:4px;background:var(--soft);border-radius:999px;padding:4px;margin:4px 0 16px}
+.seg button{border:0;background:transparent;color:var(--muted);font:500 14px 'DM Sans';padding:8px 18px;border-radius:999px;cursor:pointer}
+.seg button.on{background:var(--accent);color:var(--ontop)}
+.day-group .section-head{margin-bottom:4px}.day-group.late{border-color:var(--accent)}
+.onb-dots{display:flex;gap:8px;margin-bottom:14px}.onb-dots i{width:28px;height:6px;border-radius:6px;background:var(--line2)}
+.onb-dots i.on{background:var(--accent)}.onb-dots i.done{background:var(--accent);opacity:.45}
+.checks{display:grid;gap:8px}.checks .check{display:flex;align-items:center;gap:8px}
+.help-list{margin:.6rem 0 0;padding-left:1.1rem;display:grid;gap:8px;color:var(--muted)}
+.help-list b{color:var(--ink)}

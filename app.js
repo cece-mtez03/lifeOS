@@ -56,13 +56,13 @@ window.LifeApp = {
   get: () => data,
   pristine: () => !(data.meta && data.meta.updatedAt),
   apply(raw) { // sustituye los datos locales sin volver a subirlos
-    data = normalize(raw);
+    data = normalize(raw); ui.onb = null;
     try { localStorage.setItem(KEY, JSON.stringify(data)); } catch {}
     applyTheme();
     const a = document.activeElement;
     if (!(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && $('#app').contains(a))) render();
   },
-  reset() { data = normalize(null); try { localStorage.removeItem(KEY); } catch {} applyTheme(); render(); }
+  reset() { data = normalize(null); ui.onb = null; try { localStorage.removeItem(KEY); } catch {} applyTheme(); render(); }
 };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const same = (a, b) => String(a) === String(b);
@@ -198,7 +198,7 @@ function applyTheme() {
 }
 
 /* ---------- Estado de interfaz ---------- */
-const ui = { editRoutine: null, view: 'today', dumpNote: '', editTask: null, calSettings: false, editActivity: null, weekOffset: 0, shuffle: {} };
+const ui = { editRoutine: null, view: 'today', dumpNote: '', editTask: null, calSettings: false, editActivity: null, weekOffset: 0, shuffle: {}, taskView: 'spaces', onb: null };
 
 function page(view) {
   ui.view = view;
@@ -392,7 +392,43 @@ function gapHtml(g) {
     <div class="form-actions"><button type="button" class="primary small" data-act="plan-add-all" data-start="${g.s}" data-items="${esc(JSON.stringify(g.plan.map(i => ({ kind: i.kind, ref: i.ref, min: i.min }))))}">＋ Añadir este plan a mi día</button><button type="button" class="text-button" data-act="sugg-shuffle" data-id="${g.s}">↻ Otra combinación</button></div>` : ''}
     <details class="sugg-more"><summary>Prefiero elegir cosas sueltas</summary><ul>${g.options.map(o => `<li><button type="button" class="sugg-opt" data-act="plan-add" data-kind="${o.kind}" data-ref="${esc(o.ref)}" data-start="${g.s}" data-min="${o.min}"><i>${o.icon}</i><span>${o.text}</span><em>＋</em></button></li>`).join('')}</ul></details></div>`;
 }
+/* ---------- Inicio guiado (solo la primera vez) ---------- */
+const needsOnboarding = () => !data.settings.onboarded && (!(data.meta && data.meta.updatedAt) || !!ui.onb);
+function finishOnboarding() { data.settings.onboarded = true; ui.onb = null; save(); page('today'); }
+function renderWelcome() {
+  const st = ui.onb.step, S = window.LifeSync && window.LifeSync.state;
+  const dots = [0, 1, 2].map(i => `<i class="${i === st ? 'on' : i < st ? 'done' : ''}"></i>`).join('');
+  const canSignIn = !!(S && S.configured && S.ready && !S.user);
+  let body = '';
+  if (st === 0) body = `<p class="eyebrow">PASO 1 DE 3</p><h2>¿Tienes un horario fijo?</h2>
+    <p class="muted">Trabajo, clases o lo que se repita cada semana. Lo bloqueo en tu día para ver solo tus huecos de verdad libres.</p>
+    <form data-form="onb-form" class="form-grid">
+      <label class="fld span2"><span>Nombre</span><input class="field" name="name" value="Trabajo" required></label>
+      <label class="fld"><span>Desde</span><input class="field" name="start" type="time" value="09:00" required></label>
+      <label class="fld"><span>Hasta</span><input class="field" name="end" type="time" value="17:00" required></label>
+      <div class="fld span2"><span>Días</span><div class="days">${WEEK_ORDER.map(d => `<label><input type="checkbox" name="day" value="${d}"${d >= 1 && d <= 5 ? ' checked' : ''}><span>${DAY_SHORT[d]}</span></label>`).join('')}</div></div>
+      <label class="check span2"><input type="checkbox" name="work" checked> Es trabajo (los días largos no te propondré más tareas de trabajo, salvo las prioritarias)</label>
+      <div class="form-actions span2"><button class="primary">Siguiente</button><button type="button" class="text-button" data-act="onb-next">No tengo horario fijo</button></div>
+    </form>
+    ${canSignIn ? '<p class="muted">¿Ya usas Planet Me en otro dispositivo? <button type="button" class="text-button" data-act="sync-signin">Entrar con Google</button></p>' : ''}`;
+  else if (st === 1) body = `<p class="eyebrow">PASO 2 DE 3</p><h2>¿Qué te gusta hacer?</h2>
+    <p class="muted">Quédate con los que te apetezcan y añade los tuyos separados por comas. Yo te sugeriré cuánto tiempo dedicarles.</p>
+    <form data-form="onb-form" class="form-grid">
+      <div class="fld span2 checks">${data.activities.map(a => `<label class="check"><input type="checkbox" name="keep" value="${esc(a.id)}" checked> ${esc(a.name)} <small class="muted">· ${a.minutes} min</small></label>`).join('') || '<small class="muted">Aún no hay ninguno: añade el primero.</small>'}</div>
+      <label class="fld span2"><span>Añade otros</span><input class="field" name="extra" placeholder="Ej. yoga, hacer puzzles, tejer"></label>
+      <div class="form-actions span2"><button class="primary">Siguiente</button><button type="button" class="text-button" data-act="onb-back">‹ Atrás</button></div>
+    </form>`;
+  else body = `<p class="eyebrow">PASO 3 DE 3</p><h2>Tus datos, a salvo</h2>
+    <p class="muted">Ahora se guardan en este dispositivo. Si entras con Google, se sincronizan entre tu móvil y tu ordenador y no pierdes nada.</p>
+    ${S && S.user ? `<p class="note">✓ Sesión iniciada como ${esc(S.user.email || S.user.name)}.</p>` : ''}
+    <div class="form-actions">${canSignIn ? '<button class="primary" data-act="sync-signin">Entrar con Google</button>' : ''}<button class="${canSignIn ? 'text-button' : 'primary'}" data-act="onb-finish">${canSignIn ? 'Ahora no, empezar' : 'Empezar'}</button><button class="text-button" data-act="onb-back">‹ Atrás</button></div>`;
+  $('#app').innerHTML = `<section class="welcome compact"><div><p class="eyebrow">PLANET ME</p><h1>Te damos la bienvenida.</h1><p class="muted">Tu mundo, a tu ritmo. Tres pasos y listo.</p></div></section>
+    <section class="panel onb"><div class="onb-dots" aria-hidden="true">${dots}</div>${body}
+      <p class="tiny"><button type="button" class="text-button" data-act="onb-finish">Saltar la introducción</button></p></section>`;
+}
 function renderHome() {
+  if (!ui.onb && needsOnboarding()) ui.onb = { step: 0 };
+  if (ui.onb) return renderWelcome();
   const d = new Date(), ts = today(), nowMin = d.getHours() * 60 + d.getMinutes();
   const greeting = { manana: 'Buenos días.', tarde: 'Buenas tardes.', noche: 'Buenas noches.' }[themeNow().phase];
   const info = dayInfo(ts);
@@ -455,9 +491,27 @@ function spaceCard(sp) {
     ${sp ? `<div class="card-actions"><button class="text-button" data-act="toggle-work" data-id="${esc(sp.id)}">${isWorkSpace(sp) ? 'Espacio de trabajo ✓' : 'Marcar como trabajo'}</button><button class="text-button" data-act="rename-space" data-id="${esc(sp.id)}">Renombrar</button><button class="text-button danger" data-act="del-space" data-id="${esc(sp.id)}">Eliminar</button></div>` : ''}
   </article>`;
 }
+const addDaysYmd = n => { const x = new Date(); x.setDate(x.getDate() + n); return ymd(x); };
+function renderTaskDays() {
+  const ts = today(), tom = addDaysYmd(1), wk = addDaysYmd(7);
+  const pend = data.tasks.filter(t => !t.done).sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || PRIO_RANK[prioOf(a)] - PRIO_RANK[prioOf(b)]);
+  const groups = [['Atrasadas', t => t.date && t.date < ts, 'late'], ['Hoy', t => t.date === ts], ['Mañana', t => t.date === tom], ['Esta semana', t => t.date > tom && t.date <= wk], ['Más adelante', t => t.date > wk], ['Sin fecha', t => !t.date]];
+  const done = data.tasks.filter(t => t.done).sort((a, b) => (b.doneAt || '').localeCompare(a.doneAt || '')).slice(0, 8);
+  const html = groups.map(([name, fn, cls]) => { const l = pend.filter(fn); return l.length ? `<section class="panel day-group ${cls || ''}"><div class="section-head"><div><h2>${name}</h2></div><small class="muted">${l.length}</small></div>${l.map(t => taskRow(t)).join('')}</section>` : ''; }).join('');
+  return `<section class="panel"><h2>Nueva tarea</h2>
+      <form class="form-row mini" data-form="task-form">
+        <input class="field" name="name" placeholder="Nueva tarea…" required aria-label="Nueva tarea">
+        <div class="mini-row"><select name="space" aria-label="Espacio"><option value="">General</option>${data.spaces.map(sp => `<option value="${esc(sp.id)}">${esc(sp.name)}</option>`).join('')}</select>
+          <input class="field date" name="date" type="date" value="${ts}" aria-label="Fecha">${minutesSelect(0)}${prioritySelect('Media')}<button class="primary" aria-label="Añadir tarea">+</button></div>
+      </form></section>
+    ${html || '<section class="panel"><p class="empty">No tienes tareas pendientes. Disfruta del día ✦</p></section>'}
+    ${done.length ? `<section class="panel"><details class="sugg-more"><summary>Hechas recientemente (${done.length})</summary>${done.map(t => taskRow(t)).join('')}</details></section>` : ''}`;
+}
 function renderTasks() {
+  const seg = `<div class="seg" role="tablist" aria-label="Cómo ver tus tareas"><button type="button" role="tab" class="${ui.taskView === 'spaces' ? 'on' : ''}" data-act="task-view" data-id="spaces">Por espacio</button><button type="button" role="tab" class="${ui.taskView === 'days' ? 'on' : ''}" data-act="task-view" data-id="days">Por día</button></div>`;
+  if (ui.taskView === 'days') { $('#app').innerHTML = head('Mis tareas', 'Saca las ideas de tu cabeza y dales un lugar.') + seg + renderTaskDays(); return; }
   const loose = data.tasks.some(t => !t.spaceId || !byId(data.spaces, t.spaceId));
-  $('#app').innerHTML = head('Mis tareas', 'Saca las ideas de tu cabeza y dales un lugar.') + `
+  $('#app').innerHTML = head('Mis tareas', 'Saca las ideas de tu cabeza y dales un lugar.') + seg + `
     <section class="panel">
       <h2>Crea un espacio</h2>
       <form id="space-form" class="form-row"><input class="field" name="name" placeholder="Ej. Trabajo, Máster, Boda…" required maxlength="40"><button class="primary">Guardar</button>
@@ -762,6 +816,23 @@ function suggest() {
     : 'Aún no hay actividades que encajen. Añade alguna más o prueba con más tiempo.';
 }
 
+/* ---------- Pequeñas celebraciones ---------- */
+const CHEERS = { task: ['¡Hecho! Una cosa menos en tu cabeza ✓', 'Bien ahí. Cada tarea cuenta ✓', '¡Eso es! Respira un poco ✓', 'Un pasito más ✓'], hobby: ['Un ratito para ti, bien ganado ✧', 'Eso también cuenta ✧'], rest: ['Descansar también suma ☾', 'Bien hecho: parar es parte del plan ☾'] };
+function burst(r) {
+  if (!r || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2, cols = ['#e8b64a', '#c58ad8', '#7fb6e6', '#f3c969'];
+  for (let i = 0; i < 12; i++) {
+    const el = document.createElement('span'), a = (i / 12) * Math.PI * 2 + Math.random() * .5, d = 34 + Math.random() * 34;
+    el.className = 'spark'; el.textContent = '✦'; el.setAttribute('aria-hidden', 'true');
+    el.style.cssText = `left:${cx}px;top:${cy}px;color:${cols[i % 4]};--dx:${Math.cos(a) * d}px;--dy:${Math.sin(a) * d}px`;
+    document.body.appendChild(el); setTimeout(() => el.remove(), 900);
+  }
+}
+function cheer(kind, rect, newStar) {
+  burst(rect);
+  if (!newStar) { const l = CHEERS[kind] || CHEERS.task; toast(l[Math.floor(Math.random() * l.length)]); }
+}
+
 /* ---------- Mi cielo: estrellas, niveles y planetas ---------- */
 const STARS_PER_LEVEL = 15;
 const LEVELS = ['Soñadora', 'Exploradora', 'Navegante', 'Astrónoma', 'Cartógrafa del cielo', 'Guardiana de estrellas', 'Viajera cósmica', 'Maestra de constelaciones', 'Leyenda del cielo'];
@@ -942,6 +1013,16 @@ function renderSpace() {
         <select name="season" aria-label="Estación"><option value="auto">Estación: automática</option>${Object.keys(SEASONS).map(k => `<option value="${k}"${data.settings.season === k ? ' selected' : ''}>${SEASONS[k].name}</option>`).join('')}</select>
         <select name="phase" aria-label="Momento del día"><option value="auto">Momento: automático</option>${[['manana', 'Mañana'], ['tarde', 'Tarde'], ['noche', 'Noche']].map(([k, n]) => `<option value="${k}"${data.settings.phase === k ? ' selected' : ''}>${n}</option>`).join('')}</select>
       </form></section>
+    <section class="panel"><p class="eyebrow">AYUDA</p><h2>Cómo funciona Planet Me</h2>
+      <details class="sugg-more"><summary>Ver la guía rápida</summary>
+        <ul class="help-list">
+          <li><b>Mi día:</b> te propone un plan para tu próximo hueco libre. Añádelo a tu día y marca cada cosa al hacerla.</li>
+          <li><b>Mis tareas:</b> agrúpalas por espacio o por día. La prioridad y la duración ayudan a sugerirte mejor.</li>
+          <li><b>Mi calendario:</b> tu semana con los huecos libres. En Ajustes está tu horario fijo, tu jornada y la importación de Google Calendar.</li>
+          <li><b>Hobbies y Tracker:</b> escribe un hobby y te sugiero cuánto dedicarle. El tracker te enseña cuánto y cuándo los haces.</li>
+          <li><b>Mi cielo:</b> ganas estrellas con tareas, hobbies y descansos, y desbloqueas planetas al subir de nivel. Nada se pierde.</li>
+          <li><b>Tu cuenta:</b> con Google tus datos se sincronizan entre dispositivos.</li>
+        </ul></details></section>
     <section class="panel"><h2>Tu espacio personal</h2>
       <p class="muted">Esta versión guarda tus datos en este navegador. Puedes exportarlos como copia de seguridad.</p>
       <button class="primary" data-act="export">Exportar mis datos</button>
@@ -951,6 +1032,10 @@ function renderSpace() {
 /* ---------- Acciones (clics) ---------- */
 const actions = {
   go: id => page(id),
+  'onb-next': () => { if (ui.onb) { ui.onb.step = Math.min(2, ui.onb.step + 1); render(); window.scrollTo({ top: 0 }); } },
+  'onb-back': () => { if (ui.onb) { ui.onb.step = Math.max(0, ui.onb.step - 1); render(); window.scrollTo({ top: 0 }); } },
+  'onb-finish': () => finishOnboarding(),
+  'task-view': id => { ui.taskView = id === 'days' ? 'days' : 'spaces'; render(); },
   'del-task': id => { data.tasks = data.tasks.filter(t => !same(t.id, id)); save(); render(); },
   'rename-space': id => {
     const s = byId(data.spaces, id); if (!s) return;
@@ -1056,6 +1141,24 @@ const actions = {
 
 /* ---------- Formularios ---------- */
 const forms = {
+  'onb-form': f => {
+    if (!ui.onb) return;
+    if (ui.onb.step === 0) {
+      const days = [...f.querySelectorAll('input[name=day]:checked')].map(c => +c.value);
+      if (!days.length) { alert('Elige al menos un día.'); return; }
+      if (toMin(f.end.value) <= toMin(f.start.value)) { alert('La hora de fin debe ser posterior a la de inicio.'); return; }
+      data.routines.push({ id: uid(), name: f.name.value.trim() || 'Trabajo', days, start: f.start.value, end: f.end.value, work: !!f.work.checked });
+    } else if (ui.onb.step === 1) {
+      const keep = new Set([...f.querySelectorAll('input[name=keep]:checked')].map(c => c.value));
+      data.activities = data.activities.filter(a => keep.has(String(a.id)));
+      f.extra.value.split(',').map(x => x.trim()).filter(x => x.length >= 2).forEach(name => {
+        const h = suggestHobby(name), known = data.activities.map(a => a.stack).find(c => norm(c) === norm(h.stack));
+        data.activities.push({ id: uid(), name: name[0].toUpperCase() + name.slice(1), stack: known || h.stack || 'Otros', minutes: h.minutes, energy: h.energy, tags: h.tags, goal: h.goal });
+      });
+    }
+    ui.onb.step = Math.min(2, ui.onb.step + 1);
+    save(); render(); window.scrollTo({ top: 0 });
+  },
   'task-form': f => {
     data.tasks.push({ id: uid(), name: f.name.value.trim(), date: f.date.value, spaceId: f.space.value, minutes: +f.minutes.value || 0, priority: f.priority.value, done: false });
     save(); render();
@@ -1125,10 +1228,11 @@ app.addEventListener('change', async e => {
   const t = e.target;
   if (t.dataset.task !== undefined) {
     const task = byId(data.tasks, t.dataset.task);
-    if (task) { task.done = t.checked; task.doneAt = t.checked ? today() : ''; save(); render(); }
+    if (task) { const r = t.getBoundingClientRect(), n0 = skyList().length; task.done = t.checked; task.doneAt = t.checked ? today() : ''; save(); render(); if (t.checked) cheer('task', r, skyList().length > n0); }
   } else if (t.dataset.plan !== undefined) {
     const pl = byId(data.plan, t.dataset.plan);
     if (pl) {
+      const r = t.getBoundingClientRect(), n0 = skyList().length;
       pl.done = t.checked;
       if (pl.kind === 'task') { const tk = byId(data.tasks, pl.refId); if (tk) { tk.done = t.checked; tk.doneAt = t.checked ? pl.date : ''; } }
       if (pl.kind === 'hobby') { // hacerlo en tu día cuenta como sesión en el tracker
@@ -1137,6 +1241,7 @@ app.addEventListener('change', async e => {
         if (t.checked && a) data.log.push({ id: uid(), date: pl.date, activityId: a.id, minutes: Math.max(5, toMin(pl.end) - toMin(pl.start)), planId: pl.id });
       }
       save(); render();
+      if (t.checked && pl.kind !== 'custom') cheer(pl.kind, r, skyList().length > n0);
     }
   } else if (t.dataset.logdate !== undefined) {
     const l = byId(data.log, t.dataset.logdate);
